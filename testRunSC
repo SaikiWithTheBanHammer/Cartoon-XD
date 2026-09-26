@@ -281,6 +281,42 @@ local function tween(object, properties, duration)
     ):Play()
 end
 
+-- Deterministic Roblox-like name colors. Each display name gets the same
+-- color every time it appears, while different names are distributed across
+-- the palette. This is only used for incoming-message display names.
+local NAME_COLORS = {
+    Color3.new(253/255, 41/255, 67/255),
+    Color3.new(1/255, 162/255, 255/255),
+    Color3.new(2/255, 184/255, 87/255),
+    Color3.new(170/255, 0/255, 170/255),
+    Color3.new(255/255, 128/255, 0/255),
+    Color3.new(255/255, 220/255, 70/255),
+    Color3.new(210/255, 100/255, 180/255),
+    Color3.new(210/255, 180/255, 90/255),
+}
+
+local function getNameValue(name)
+    name = tostring(name or "")
+    local value = 0
+    for index = 1, #name do
+        local cValue = string.byte(name, index) or 0
+        local reverseIndex = #name - index + 1
+        if #name % 2 == 1 then
+            reverseIndex -= 1
+        end
+        if reverseIndex % 4 >= 2 then
+            cValue = -cValue
+        end
+        value += cValue
+    end
+    return value
+end
+
+local function getDisplayNameColor(displayName)
+    local index = (getNameValue(displayName) % #NAME_COLORS) + 1
+    return NAME_COLORS[index]
+end
+
 local GuiParent = (gethui and gethui()) or CoreGui
 
 local ScreenGui = new("ScreenGui", {
@@ -1701,7 +1737,7 @@ renderMessage = function(message)
             Size = UDim2.new(1, -20, 0, 9),
             Font = Enum.Font.GothamBold,
             Text = displayName,
-            TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(55, 161, 228),
+            TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or getDisplayNameColor(displayName),
             TextSize = 8,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
