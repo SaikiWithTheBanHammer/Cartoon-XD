@@ -1597,10 +1597,10 @@ renderMessage = function(message)
         bodyWidth = math.clamp(unwrapped.X, minBodyWidth, maxBodyWidth)
         local wrapped = TextService:GetTextSize(
 
-            bodyText, textSize, font, Vector2.new(bodyWidth, 1000)
+            bodyText, textSize, font, Vector2.new(bodyWidth, 10000)
         )
         local lineHeight = 13
-        bodyHeight = math.max(lineHeight, wrapped.Y)
+        bodyHeight = math.max(lineHeight, math.ceil(wrapped.Y) + 4)
     end
 
     -- Reply target. Prefer the rendered target; if it has already scrolled
@@ -1774,7 +1774,7 @@ renderMessage = function(message)
         new("TextLabel", {
             BackgroundTransparency = 1, Position = UDim2.fromOffset(10, contentY),
             Size = UDim2.new(1, -20, 0, bodyHeight), Font = font, Text = bodyText,
-            TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(232, 232, 235), TextSize = textSize, TextWrapped = true,
+            TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(232, 232, 235), TextSize = textSize, TextWrapped = true, TextTruncate = Enum.TextTruncate.None,
             TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
         }, bubble)
     end
@@ -2008,8 +2008,10 @@ local function sendUltronJoinMessage()
 end
 
 local function sendMessage()
-    local textValue = tostring(Input.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if textValue == "" then return end
+    -- Preserve the textbox contents exactly. Only use a trimmed copy to decide
+    -- whether the message is effectively empty; never trim or truncate what is sent.
+    local textValue = tostring(Input.Text or "")
+    if textValue:gsub("%s+", "") == "" then return end
 
     local elapsed = os.clock() - lastSentAt
     if elapsed < SLOW_MODE then
@@ -2025,7 +2027,7 @@ local function sendMessage()
         username = profile.username,
         displayName = profile.displayName,
         type = "text",
-        message = textValue:sub(1, 1000),
+        message = textValue,
         timestamp = DateTime.now().UnixTimestampMillis,
     }
     if replyKey then
@@ -2104,11 +2106,9 @@ Input.FocusLost:Connect(function(enterPressed)
     if enterPressed then sendMessage() end
 end)
 
-Input:GetPropertyChangedSignal("Text"):Connect(function()
-    if #Input.Text > 1000 then
-        Input.Text = Input.Text:sub(1, 1000)
-    end
-end)
+-- Do not enforce a client-side character limit here. Roblox/Firebase can store
+-- the full TextBox value, and changing Input.Text while the user is typing was
+-- the cause of the tail of longer messages being silently discarded.
 
 -- Snapshot the newest existing message. Nothing before this point is rendered.
 cutoffKey = getLatestKey()
