@@ -1383,19 +1383,10 @@ local function rememberDMUser(user)
 end
 
 local function saveDMIdentity()
-    if not DMAuth.idToken or not DMAuth.uid then return false end
-    local data = {
-        authUid = tostring(DMAuth.uid),
-        robloxUserId = tostring(LocalPlayer.UserId),
-        username = LocalPlayer.Name,
-        displayName = LocalPlayer.DisplayName,
-        updatedAt = DateTime.now().UnixTimestampMillis,
-    }
-    local ok = requestJSON("PUT", dmAuthURL("/userLinks/" .. urlEncode(LocalPlayer.UserId), DMAuth.idToken), data)
-    if not ok and dmRefreshAuthToken() then
-        ok = requestJSON("PUT", dmAuthURL("/userLinks/" .. urlEncode(LocalPlayer.UserId), DMAuth.idToken), data)
-    end
-    return ok
+    -- DM Firebase is using direct REST access in this client. There is no
+    -- separate Firebase account to create, so identity registration must not
+    -- block DM sending. Kept as a compatibility no-op for existing calls.
+    return true
 end
 saveDMIdentity()
 loadDMHistory()
@@ -1740,20 +1731,11 @@ sendDM = function(stickerUrl, stickerAsset)
     end
 
     -- Always obtain a usable DM Firebase session before attempting the write.
-    if not DMAuth.idToken or not DMAuth.uid then
-        if not dmSignIn() then
-            Input.PlaceholderText = "DM Firebase sign-in failed"
-            return false
-        end
+    if not DMAuth.uid then
+        DMAuth.uid = tostring(LocalPlayer.UserId)
     end
-    if not saveDMIdentity() then
-        if not dmRefreshAuthToken() or not saveDMIdentity() then
-            dmSignIn()
-            if not saveDMIdentity() then
-                Input.PlaceholderText = "DM account setup failed"
-                return false
-            end
-        end
+    if not DMAuth.idToken then
+        DMAuth.idToken = "public"
     end
 
     local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
@@ -1785,7 +1767,6 @@ sendDM = function(stickerUrl, stickerAsset)
     if not metaOK then
         dmSignIn()
         if DMAuth.idToken then
-            saveDMIdentity()
             metaOK, _, metaRaw = requestJSON(
                 "PUT",
                 dmAuthURL("/dmThreads/" .. urlEncode(thread) .. "/meta", DMAuth.idToken),
@@ -1846,7 +1827,6 @@ sendDM = function(stickerUrl, stickerAsset)
     if not ok then
         dmSignIn()
         if DMAuth.idToken then
-            saveDMIdentity()
             ok, _, raw = requestJSON("PUT", dmAuthURL(
                 "/dmThreads/" .. urlEncode(thread) .. "/messages/" .. urlEncode(messageId),
                 DMAuth.idToken
