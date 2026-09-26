@@ -1,0 +1,1945 @@
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TextService = game:GetService("TextService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+local GUI_NAME = "SaikiRechat"
+local MAIN_W, MAIN_H = 425, 359
+local POLL_RATE = 1.5
+local SLOW_MODE = 5
+local MAX_CARDS = 50
+
+local FIREBASE_DB = "https://sxkicxat-default-rtdb.asia-southeast1.firebasedatabase.app"
+local FIREBASE_API_KEY = "AIzaSyCgvkvar8qhD3zqYC83BW6GHxGQVYoDhrM"
+
+local HIDE_BUTTON_URL = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/SchatButton.jpg"
+local SEND_ICON_URL = "https://github.com/SaikiWithTheBanHammer/ScriptBlox/blob/main/SendIcon.jpg"
+local CACHE_FOLDER = "SaikiRechatCache"
+local EMOJI_CACHE_FOLDER = CACHE_FOLDER .. "/reactions"
+local STICKER_CACHE_FOLDER = CACHE_FOLDER .. "/stickers"
+local STICKER_REPOS = {
+    {name="Joined", repo="Joined-XD"},
+    {name="Drawing", repo="Drawing-XD"},
+    {name="Cartoon", repo="Cartoon-XD"},
+    {name="Anime", repo="Anime-XD"},
+    {name="Saiki", repo="Saiki-XD"},
+    {name="CAT-DOG", repo="CAT-DOG-XD"},
+    {name="Misclaneous", repo="Misclaneous-XD"},
+}
+local GITHUB_OWNER = "SaikiWithTheBanHammer"
+
+local REACTIONS = {"🤡","🤣","🥀","🐷","💩","🔥","📸","😭","🎀","👍","😅","😍","🥰","🥲","😁","😫","🤑","😨","🥶","😡","😈","👺","👽","💀","☠️","🙉","🐶","🩸"}
+
+local function emojiCodepoints(value)
+    local out = {}
+    local ok = pcall(function()
+        for _, codepoint in utf8.codes(value) do
+            table.insert(out, string.format("%x", codepoint))
+        end
+    end)
+    return ok and table.concat(out, "-") or nil
+end
+
+local function cacheReactionAsset(reaction)
+    if not (writefile and isfile and getcustomasset) then return nil end
+    local codepoints = emojiCodepoints(reaction)
+    if not codepoints then return nil end
+
+    local path = EMOJI_CACHE_FOLDER .. "/" .. codepoints .. ".png"
+    if not isfile(path) then
+        local url = "https://cdn.jsdelivr.net/gh/jdecked/twemoji@17.0.3/assets/72x72/" .. codepoints .. ".png"
+        local ok, data = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if ok and type(data) == "string" and #data > 0 then
+            pcall(writefile, path, data)
+        end
+    end
+
+    if isfile(path) then
+        local ok, asset = pcall(getcustomasset, path)
+        if ok then return asset end
+    end
+    return nil
+end
+
+
+local function getRequest()
+    return request or http_request or (syn and syn.request) or (fluxus and fluxus.request)
+end
+
+local REQUEST = getRequest()
+assert(REQUEST, "Saiki Rechat: your executor does not expose an HTTP request function.")
+
+local function requestJSON(method, url, body, contentType)
+    local options = {
+        Url = url,
+        Method = method,
+        Headers = { ["Content-Type"] = contentType or "application/json" },
+    }
+    if body ~= nil then
+        options.Body = contentType == "application/x-www-form-urlencoded" and tostring(body) or HttpService:JSONEncode(body)
+    end
+
+    local ok, result = pcall(REQUEST, options)
+    if not ok or not result then
+        return false, nil, tostring(result)
+    end
+
+    local status = tonumber(result.StatusCode or result.Status or 0) or 0
+    local raw = result.Body or result.body or ""
+    local decoded
+    if raw ~= "" then
+        pcall(function() decoded = HttpService:JSONDecode(raw) end)
+    end
+    return status >= 200 and status < 300, decoded, raw
+end
+
+local function urlEncode(value)
+    return HttpService:UrlEncode(tostring(value))
+end
+
+local function authURL(path, token, extra)
+    local url = FIREBASE_DB .. path .. ".json?auth=" .. urlEncode(token or "")
+    if extra and extra ~= "" then
+        url = url .. "&" .. extra
+    end
+    return url
+end
+
+-- -----------------------------------------------------------------------------
+-- Small local cache
+-- -----------------------------------------------------------------------------
+local function ensureFolder()
+    if makefolder and isfolder then
+        if not isfolder(CACHE_FOLDER) then pcall(makefolder, CACHE_FOLDER) end
+    elseif makefolder then
+        pcall(makefolder, CACHE_FOLDER)
+    end
+end
+ensureFolder()
+if makefolder and isfolder then
+    if not isfolder(EMOJI_CACHE_FOLDER) then pcall(makefolder, EMOJI_CACHE_FOLDER) end
+elseif makefolder then
+    pcall(makefolder, EMOJI_CACHE_FOLDER)
+end
+if makefolder and isfolder then
+    if not isfolder(STICKER_CACHE_FOLDER) then pcall(makefolder, STICKER_CACHE_FOLDER) end
+elseif makefolder then
+    pcall(makefolder, STICKER_CACHE_FOLDER)
+end
+
+local function rawGithub(url)
+    return url:gsub("github%.com/([^/]+/[^/]+)/blob/", "raw.githubusercontent.com/%1/")
+end
+
+local function cacheImage(name, url)
+    if not (writefile and isfile and getcustomasset) then
+        return url
+    end
+
+    local path = CACHE_FOLDER .. "/" .. name
+    if not isfile(path) then
+        local ok, data = pcall(function()
+            return game:HttpGet(rawGithub(url))
+        end)
+        if ok and type(data) == "string" and #data > 0 then
+            pcall(writefile, path, data)
+        end
+    end
+
+    if isfile(path) then
+        local ok, asset = pcall(getcustomasset, path)
+        if ok and asset then return asset end
+    end
+    return url
+end
+
+local HIDE_ASSET = cacheImage("schat_button.jpg", HIDE_BUTTON_URL)
+local SEND_ASSET = cacheImage("send_icon.jpg", SEND_ICON_URL)
+
+-- -----------------------------------------------------------------------------
+-- Firebase anonymous auth
+-- -----------------------------------------------------------------------------
+local Auth = {
+    uid = nil,
+    idToken = nil,
+    refreshToken = nil,
+}
+
+local function firebaseSignIn()
+    local ok, data, raw = requestJSON(
+        "POST",
+        "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. urlEncode(FIREBASE_API_KEY),
+        {returnSecureToken = true}
+    )
+
+    if not ok or type(data) ~= "table" or not data.localId then
+        error("Saiki Rechat: Firebase anonymous sign-in failed: " .. tostring(raw))
+    end
+
+    Auth.uid = data.localId
+    Auth.idToken = data.idToken
+    Auth.refreshToken = data.refreshToken
+end
+
+local function refreshAuthToken()
+    if not Auth.refreshToken then return false end
+
+    local body = "grant_type=refresh_token&refresh_token=" .. urlEncode(Auth.refreshToken)
+    local ok, data = requestJSON(
+        "POST",
+        "https://securetoken.googleapis.com/v1/token?key=" .. urlEncode(FIREBASE_API_KEY),
+        body,
+        "application/x-www-form-urlencoded"
+    )
+
+    if ok and data and data.id_token then
+        Auth.idToken = data.id_token
+        Auth.refreshToken = data.refresh_token or Auth.refreshToken
+        return true
+    end
+    return false
+end
+
+firebaseSignIn()
+
+local profile = {
+    robloxUserId = LocalPlayer.UserId,
+    username = LocalPlayer.Name,
+    displayName = LocalPlayer.DisplayName,
+}
+
+local function saveProfile()
+    requestJSON(
+        "PUT",
+        authURL("/profiles/" .. urlEncode(Auth.uid), Auth.idToken),
+        profile
+    )
+end
+saveProfile()
+
+-- -----------------------------------------------------------------------------
+-- GUI helpers
+-- -----------------------------------------------------------------------------
+local old = CoreGui:FindFirstChild(GUI_NAME)
+if old then old:Destroy() end
+
+local function new(className, properties, parent)
+    local object = Instance.new(className)
+    for key, value in pairs(properties or {}) do
+        object[key] = value
+    end
+    if parent then object.Parent = parent end
+    return object
+end
+
+local function addCorner(parent, radius)
+    return new("UICorner", {CornerRadius = UDim.new(0, radius)}, parent)
+end
+
+local function addStroke(parent, color, transparency, thickness)
+    return new("UIStroke", {
+        Color = color or Color3.fromRGB(35, 35, 38),
+        Transparency = transparency == nil and 0 or transparency,
+        Thickness = thickness or 1,
+    }, parent)
+end
+
+local function tween(object, properties, duration)
+    TweenService:Create(
+        object,
+        TweenInfo.new(duration or 0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        properties
+    ):Play()
+end
+
+local GuiParent = (gethui and gethui()) or CoreGui
+
+local ScreenGui = new("ScreenGui", {
+    Name = GUI_NAME,
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, GuiParent)
+
+-- Main window: 425x359, matching the reference aspect ratio.
+local Main = new("Frame", {
+    Name = "Main",
+    Size = UDim2.fromOffset(MAIN_W, MAIN_H),
+    Position = UDim2.new(0.5, -MAIN_W / 2, 0.5, -MAIN_H / 2),
+    BackgroundColor3 = Color3.fromRGB(5, 5, 6),
+    BorderSizePixel = 0,
+    Active = true,
+}, ScreenGui)
+addCorner(Main, 17)
+addStroke(Main, Color3.fromRGB(31, 31, 34), 0.05, 1)
+
+-- Header is intentionally compact.
+local Header = new("Frame", {
+    Name = "Header",
+    Size = UDim2.new(1, 0, 0, 47),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Active = true,
+}, Main)
+
+local Title = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(23, 10),
+    Size = UDim2.new(1, -80, 0, 17),
+    Font = Enum.Font.GothamBold,
+    Text = "S A I K I   R E C H A T",
+    TextColor3 = Color3.fromRGB(38, 157, 235),
+    TextSize = 13,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, Header)
+
+local Subtitle = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(24, 27),
+    Size = UDim2.new(1, -80, 0, 12),
+    Font = Enum.Font.Gotham,
+    Text = "SERVER CHAT",
+    TextColor3 = Color3.fromRGB(75, 75, 80),
+    TextSize = 8,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, Header)
+
+local Close = new("TextButton", {
+    BackgroundTransparency = 1,
+    Position = UDim2.new(1, -42, 0, 9),
+    Size = UDim2.fromOffset(25, 25),
+    Font = Enum.Font.GothamMedium,
+    Text = "X",
+    TextColor3 = Color3.fromRGB(105, 105, 110),
+    TextSize = 12,
+    AutoButtonColor = false,
+}, Header)
+
+-- Message viewport.
+local Scroll = new("ScrollingFrame", {
+    Name = "Messages",
+    Position = UDim2.fromOffset(12, 49),
+    Size = UDim2.new(1, -24, 1, -103),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 2,
+    ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45),
+    CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+    ClipsDescendants = true,
+}, Main)
+
+new("UIListLayout", {
+    Padding = UDim.new(0, 5),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+}, Scroll)
+
+new("UIPadding", {
+    PaddingTop = UDim.new(0, 4),
+    PaddingBottom = UDim.new(0, 7),
+    PaddingLeft = UDim.new(0, 1),
+    PaddingRight = UDim.new(0, 1),
+}, Scroll)
+
+-- Composer.
+local Composer = new("Frame", {
+    Name = "Composer",
+    Position = UDim2.new(0, 12, 1, -51),
+    Size = UDim2.new(1, -24, 0, 38),
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    BorderSizePixel = 0,
+}, Main)
+addCorner(Composer, 999)
+addStroke(Composer, Color3.fromRGB(30, 30, 33), 0.1, 1)
+
+local Input = new("TextBox", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(14, 0),
+    Size = UDim2.new(1, -58, 1, 0),
+    ClearTextOnFocus = false,
+    Font = Enum.Font.GothamBold,
+    PlaceholderText = "Type message...",
+    PlaceholderColor3 = Color3.fromRGB(78, 78, 83),
+    TextColor3 = Color3.fromRGB(232, 232, 235),
+    TextSize = 11,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Center,
+}, Composer)
+
+-- Sticker button opens the sticker browser.
+local StickerOpen = new("TextButton", {
+    BackgroundTransparency = 1,
+    Position = UDim2.new(1, -70, 0.5, -14),
+    Size = UDim2.fromOffset(28, 28),
+    Font = Enum.Font.GothamBold,
+    Text = "+",
+    TextColor3 = Color3.fromRGB(115, 115, 120),
+    TextSize = 18,
+    AutoButtonColor = false,
+}, Composer)
+addCorner(StickerOpen, 14)
+
+-- Small circular image button using the user's SendIcon.jpg.
+local Send = new("ImageButton", {
+    BackgroundColor3 = Color3.fromRGB(24, 24, 27),
+    Position = UDim2.new(1, -37, 0.5, -14),
+    Size = UDim2.fromOffset(28, 28),
+    Image = SEND_ASSET,
+    ScaleType = Enum.ScaleType.Fit,
+    AutoButtonColor = false,
+    ClipsDescendants = true,
+}, Composer)
+addCorner(Send, 14)
+
+local ReplyBar = new("Frame", {
+    Visible = false,
+    Position = UDim2.new(0, 1, 0, -35),
+    Size = UDim2.new(1, -2, 0, 31),
+    BackgroundColor3 = Color3.fromRGB(17, 17, 19),
+    BorderSizePixel = 0,
+    ZIndex = 10,
+}, Composer)
+addCorner(ReplyBar, 8)
+
+new("Frame", {
+    BackgroundColor3 = Color3.fromRGB(45, 160, 232),
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(0, 5),
+    Size = UDim2.new(0, 2, 1, -10),
+    ZIndex = 11,
+}, ReplyBar)
+
+local ReplyLabel = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(9, 3),
+    Size = UDim2.new(1, -42, 0, 10),
+    Font = Enum.Font.GothamBold,
+    Text = "REPLY",
+    TextColor3 = Color3.fromRGB(45, 160, 232),
+    TextSize = 7,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 11,
+}, ReplyBar)
+
+local ReplyText = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(9, 13),
+    Size = UDim2.new(1, -42, 0, 12),
+    Font = Enum.Font.Gotham,
+    Text = "",
+    TextColor3 = Color3.fromRGB(155, 155, 160),
+    TextSize = 8,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    ZIndex = 11,
+}, ReplyBar)
+
+local ReplyCancel = new("TextButton", {
+    BackgroundTransparency = 1,
+    Position = UDim2.new(1, -31, 0, 3),
+    Size = UDim2.fromOffset(25, 25),
+    Font = Enum.Font.GothamBold,
+    Text = "×",
+    TextColor3 = Color3.fromRGB(120, 120, 125),
+    TextSize = 14,
+    AutoButtonColor = false,
+    ZIndex = 12,
+}, ReplyBar)
+
+-- -----------------------------------------------------------------------------
+-- Sticker browser
+-- -----------------------------------------------------------------------------
+-- GitHub repository discovery + LOCAL asset caching.
+-- IMPORTANT: GitHub pages/URLs cannot be assigned directly to Image/ImageButton.
+-- We discover the repository files, download the actual image bytes, save them
+-- with writefile(), then use getcustomasset() for the Roblox UI.
+local stickerData = {}
+local stickerMeta = {}
+local activeStickerCategory = 1
+local stickerLoaded = false
+local stickerLoading = false
+local stickerGeneration = 0
+
+-- Sticker browser container.
+local StickerPanel = new("Frame", {
+    Name = "StickerPanel",
+    Size = UDim2.fromOffset(330, 245),
+    Position = UDim2.new(1, -342, 1, -299),
+    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+    BackgroundTransparency = 0.02,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 50,
+    Active = true,
+}, Main)
+addCorner(StickerPanel, 12)
+addStroke(StickerPanel, Color3.fromRGB(35, 35, 39), 0.05, 1)
+
+local StickerHeader = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(9, 6),
+    Size = UDim2.new(1, -18, 0, 15),
+    Font = Enum.Font.GothamBold,
+    Text = "STICKERS",
+    TextColor3 = Color3.fromRGB(225, 225, 230),
+    TextSize = 9,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 52,
+}, StickerPanel)
+
+local StickerClose = new("TextButton", {
+    BackgroundTransparency = 1,
+    Position = UDim2.new(1, -29, 0, 4),
+    Size = UDim2.fromOffset(24, 20),
+    Font = Enum.Font.GothamBold,
+    Text = "X",
+    TextColor3 = Color3.fromRGB(105, 105, 110),
+    TextSize = 9,
+    AutoButtonColor = false,
+    ZIndex = 53,
+}, StickerPanel)
+StickerClose.MouseButton1Click:Connect(function()
+    StickerPanel.Visible = false
+    stickerGeneration += 1
+end)
+
+local StickerTabs = new("ScrollingFrame", {
+    Name = "StickerTabs",
+    Position = UDim2.fromOffset(7, 24),
+    Size = UDim2.new(1, -14, 0, 27),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 0,
+    ScrollingDirection = Enum.ScrollingDirection.X,
+    CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.X,
+    ZIndex = 51,
+}, StickerPanel)
+
+local StickerTabsLayout = new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    Padding = UDim.new(0, 4),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    VerticalAlignment = Enum.VerticalAlignment.Center,
+}, StickerTabs)
+
+local StickerScroll = new("ScrollingFrame", {
+    Name = "StickerScroll",
+    Position = UDim2.fromOffset(7, 65),
+    Size = UDim2.new(1, -14, 1, -93),
+    BackgroundColor3 = Color3.fromRGB(7, 7, 9),
+    BackgroundTransparency = 0.15,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 2,
+    ScrollBarImageColor3 = Color3.fromRGB(55, 55, 60),
+    CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+    ZIndex = 51,
+}, StickerPanel)
+addCorner(StickerScroll, 8)
+
+new("UIGridLayout", {
+    CellSize = UDim2.fromOffset(56, 56),
+    CellPadding = UDim2.fromOffset(5, 5),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    HorizontalAlignment = Enum.HorizontalAlignment.Left,
+    VerticalAlignment = Enum.VerticalAlignment.Top,
+}, StickerScroll)
+
+local StickerStatus = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(8, 227),
+    Size = UDim2.new(1, -16, 0, 10),
+    Font = Enum.Font.Gotham,
+    Text = "",
+    TextColor3 = Color3.fromRGB(105, 105, 110),
+    TextSize = 7,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 53,
+}, StickerPanel)
+
+local function encodePath(path)
+    local out = {}
+    for part in tostring(path):gmatch("[^/]+") do
+        table.insert(out, HttpService:UrlEncode(part))
+    end
+    return table.concat(out, "/")
+end
+
+local function isImagePath(path)
+    local lower = tostring(path):lower()
+    -- Roblox custom assets are most reliable with these formats.
+    return lower:match("%.png$") or lower:match("%.jpg$") or lower:match("%.jpeg$")
+end
+
+local function stickerManifestPath(repoName)
+    return STICKER_CACHE_FOLDER .. "/_manifest_" .. tostring(repoName):gsub("[^%w%-]", "_") .. ".json"
+end
+
+local function stickerCacheName(repoName, path)
+    local safe = (tostring(repoName) .. "__" .. tostring(path)):gsub("[^%w%._%-]", "_")
+    return STICKER_CACHE_FOLDER .. "/" .. safe
+end
+
+local function httpGetBody(url, headers)
+    if not REQUEST then return false, nil, "no request function" end
+    local ok, result = pcall(REQUEST, {
+        Url = url,
+        Method = "GET",
+        Headers = headers or {},
+    })
+    if not ok or not result then
+        return false, nil, tostring(result)
+    end
+    local status = tonumber(result.StatusCode or result.Status or 0) or 0
+    local body = result.Body or result.body
+    if status >= 200 and status < 300 and type(body) == "string" and #body > 0 then
+        return true, body, status
+    end
+    return false, body, status
+end
+
+local function ensureStickerFolders()
+    if not makefolder then return end
+    if isfolder then
+        if not isfolder(CACHE_FOLDER) then pcall(makefolder, CACHE_FOLDER) end
+        if not isfolder(STICKER_CACHE_FOLDER) then pcall(makefolder, STICKER_CACHE_FOLDER) end
+    else
+        pcall(makefolder, CACHE_FOLDER)
+        pcall(makefolder, STICKER_CACHE_FOLDER)
+    end
+end
+ensureStickerFolders()
+
+local function saveStickerManifest(repoName, branch, items)
+    if not (writefile and HttpService) then return end
+    local path = stickerManifestPath(repoName)
+    pcall(writefile, path, HttpService:JSONEncode({branch = branch, items = items, savedAt = os.time()}))
+end
+
+local function readStickerManifest(repoName)
+    if not (readfile and isfile and isfile(stickerManifestPath(repoName))) then return nil end
+    local ok, raw = pcall(readfile, stickerManifestPath(repoName))
+    if not ok or type(raw) ~= "string" then return nil end
+    local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+    if not ok2 or type(decoded) ~= "table" or type(decoded.items) ~= "table" then return nil end
+    return decoded
+end
+
+local function fetchStickerRepo(repoName)
+    -- Use the GitHub repo endpoint first so the script works if the repository
+    -- uses master or another default branch instead of main.
+    local repoApi = "https://api.github.com/repos/" .. GITHUB_OWNER .. "/" .. repoName
+    local okRepo, repoBody = httpGetBody(repoApi, { ["Accept"] = "application/vnd.github+json", ["User-Agent"] = "Saiki-Rechat" })
+    if not okRepo then
+        local cached = readStickerManifest(repoName)
+        if cached then return cached.items, cached.branch or "main", true end
+        return {}, "main", false
+    end
+
+    local okDecoded, repoInfo = pcall(HttpService.JSONDecode, HttpService, repoBody)
+    if not okDecoded or type(repoInfo) ~= "table" then return {}, "main", false end
+    local branch = tostring(repoInfo.default_branch or "main")
+
+    local treeUrl = "https://api.github.com/repos/" .. GITHUB_OWNER .. "/" .. repoName .. "/git/trees/" .. HttpService:UrlEncode(branch) .. "?recursive=1"
+    local okTree, treeBody = httpGetBody(treeUrl, { ["Accept"] = "application/vnd.github+json", ["User-Agent"] = "Saiki-Rechat" })
+    if not okTree then
+        local cached = readStickerManifest(repoName)
+        if cached then return cached.items, cached.branch or branch, true end
+        return {}, branch, false
+    end
+
+    local okTreeDecoded, tree = pcall(HttpService.JSONDecode, HttpService, treeBody)
+    if not okTreeDecoded or type(tree) ~= "table" or type(tree.tree) ~= "table" then
+        local cached = readStickerManifest(repoName)
+        if cached then return cached.items, cached.branch or branch, true end
+        return {}, branch, false
+    end
+
+    local result = {}
+    for _, item in ipairs(tree.tree) do
+        if item.type == "blob" and isImagePath(item.path) then
+            table.insert(result, {
+                path = tostring(item.path),
+                sha = tostring(item.sha or ""),
+                size = tonumber(item.size or 0) or 0,
+            })
+        end
+    end
+    table.sort(result, function(a, b) return a.path:lower() < b.path:lower() end)
+    saveStickerManifest(repoName, branch, result)
+    return result, branch, true
+end
+
+local function getStickerAsset(repoName, branch, item)
+    if not (writefile and isfile and getcustomasset) then
+        return nil, "executor has no writefile/getcustomasset"
+    end
+
+    local localPath = stickerCacheName(repoName, item.path)
+    if isfile(localPath) then
+        local ok, asset = pcall(getcustomasset, localPath)
+        if ok and asset then return asset, "cache" end
+    end
+
+    local rawUrl = "https://raw.githubusercontent.com/" .. GITHUB_OWNER .. "/" .. repoName .. "/" .. encodePath(branch .. "/" .. item.path)
+    local ok, body, status = httpGetBody(rawUrl, { ["User-Agent"] = "Saiki-Rechat" })
+    if not ok or type(body) ~= "string" then
+        return nil, "download " .. tostring(status)
+    end
+
+    local wrote = pcall(writefile, localPath, body)
+    if not wrote or not isfile(localPath) then
+        return nil, "write failed"
+    end
+
+    local okAsset, asset = pcall(getcustomasset, localPath)
+    if okAsset and asset then return asset, "download" end
+    return nil, "getcustomasset failed"
+end
+
+local function clearStickerGrid()
+    for _, c in ipairs(StickerScroll:GetChildren()) do
+        if c:IsA("GuiButton") or c:IsA("ImageButton") or c:IsA("ImageLabel") then
+            c:Destroy()
+        end
+    end
+end
+
+local function sendSticker(sticker)
+    if not sticker then return end
+    local elapsed = os.clock() - lastSentAt
+    if elapsed < SLOW_MODE then
+        showSlowMode(SLOW_MODE - elapsed)
+        return
+    end
+    lastSentAt = os.clock()
+    StickerPanel.Visible = false
+
+    -- The Firebase message contains the PUBLIC GitHub URL, not the local
+    -- executor asset path. Other users can therefore download/display it too.
+    local message = {
+        uid = Auth.uid,
+        robloxUserId = profile.robloxUserId,
+        username = profile.username,
+        displayName = profile.displayName,
+        type = "sticker",
+        sticker = sticker.url,
+        timestamp = DateTime.now().UnixTimestampMillis,
+    }
+    if replyKey then message.replyTo = replyKey end
+
+    local optimisticKey = "local_sticker_" .. tostring(message.timestamp) .. "_" .. tostring(math.random(100000,999999))
+    message.key = optimisticKey
+    message._optimistic = true
+    seen[optimisticKey] = true
+    renderMessage(message)
+    clearReply()
+
+    local payload = {
+        uid=message.uid, robloxUserId=message.robloxUserId, username=message.username,
+        displayName=message.displayName, type="sticker", sticker=message.sticker,
+        timestamp=message.timestamp,
+    }
+    if message.replyTo then payload.replyTo = message.replyTo end
+
+    task.spawn(function()
+        local ok, result = requestJSON("POST", authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken), payload)
+        if ok then
+            local realKey = type(result) == "table" and result.name or nil
+            local card = cardByKey[optimisticKey]
+            if realKey and card then
+                cardByKey[optimisticKey] = nil
+                card.Key = realKey
+                card.Message.key = realKey
+                card.Message._optimistic = nil
+                cardByKey[realKey] = card
+                seen[realKey] = true
+            end
+        else
+            local card = cardByKey[optimisticKey]
+            if card then
+                removeCard(card)
+                for i=#cards,1,-1 do
+                    if cards[i] == card then table.remove(cards,i) break end
+                end
+            end
+            lastSentAt = -math.huge
+        end
+    end)
+end
+
+local function renderStickerGrid()
+    clearStickerGrid()
+    local items = stickerData[activeStickerCategory] or {}
+    local meta = stickerMeta[activeStickerCategory]
+    stickerGeneration += 1
+    local generation = stickerGeneration
+
+    if #items == 0 then
+        StickerStatus.Text = meta and meta.error or "No images found in this category."
+        return
+    end
+
+    local total = #items
+    local ready = 0
+    local failed = 0
+    StickerStatus.Text = string.format("Loading 0/%d...", total)
+
+    -- Create the entire grid first with empty ImageButtons, then download/cache
+    -- images in small batches. The UI stays responsive while assets arrive.
+    local buttons = {}
+    for i, sticker in ipairs(items) do
+        local b = new("ImageButton", {
+            BackgroundColor3 = Color3.fromRGB(20,20,23),
+            BorderSizePixel = 0,
+            Image = "",
+            ScaleType = Enum.ScaleType.Fit,
+            AutoButtonColor = false,
+            ZIndex = 52,
+        }, StickerScroll)
+        b.LayoutOrder = i
+        addCorner(b, 8)
+        local loading = new("TextLabel", {
+            BackgroundTransparency=1, Size=UDim2.fromScale(1,1),
+            Font=Enum.Font.GothamBold, Text="...", TextColor3=Color3.fromRGB(75,75,80),
+            TextSize=10, ZIndex=53,
+        }, b)
+        buttons[i] = b
+        b.MouseButton1Click:Connect(function() sendSticker(sticker) end)
+    end
+
+    task.spawn(function()
+        local nextIndex = 1
+        local workers = math.min(3, total)
+        local lock = {}
+
+        local function worker()
+            while true do
+                local index
+                if nextIndex <= total then
+                    index = nextIndex
+                    nextIndex += 1
+                else
+                    break
+                end
+
+                local b = buttons[index]
+                local sticker = items[index]
+                local asset = nil
+                local ok, result = pcall(function()
+                    return getStickerAsset(STICKER_REPOS[activeStickerCategory].repo, meta.branch, sticker)
+                end)
+                if ok then asset = result end
+
+                if generation ~= stickerGeneration or not StickerPanel.Visible then
+                    break
+                end
+
+                if asset and b and b.Parent then
+                    b.Image = asset
+                    local label = b:FindFirstChildOfClass("TextLabel")
+                    if label then label.Visible = false end
+                    ready += 1
+                else
+                    failed += 1
+                    local label = b and b:FindFirstChildOfClass("TextLabel")
+                    if label then label.Text = "!" end
+                end
+
+                StickerStatus.Text = string.format("Loading %d/%d...", ready + failed, total)
+                task.wait(0.02)
+            end
+        end
+
+        local running = {}
+        for _=1,workers do
+            table.insert(running, task.spawn(worker))
+        end
+
+        -- Wait until the workers finish without blocking the UI thread.
+        while nextIndex <= total do task.wait(0.05) end
+        task.wait(0.15)
+        if generation == stickerGeneration then
+            if failed > 0 then
+                StickerStatus.Text = string.format("Loaded %d/%d  |  %d failed", ready, total, failed)
+            else
+                StickerStatus.Text = string.format("Loaded %d/%d  |  cached for next run", ready, total)
+            end
+        end
+    end)
+end
+
+local function selectStickerCategory(index)
+    activeStickerCategory = index
+    for _, c in ipairs(StickerTabs:GetChildren()) do
+        if c:IsA("TextButton") then
+            c.BackgroundColor3 = (c.LayoutOrder == index) and Color3.fromRGB(34,34,38) or Color3.fromRGB(18,18,20)
+        end
+    end
+
+    local items = stickerData[index]
+    if items then
+        renderStickerGrid()
+        return
+    end
+
+    local cat = STICKER_REPOS[index]
+    StickerStatus.Text = "Finding images..."
+    task.spawn(function()
+        local itemsFound, branch, ok = fetchStickerRepo(cat.repo)
+        if activeStickerCategory ~= index then return end
+        if ok then
+            stickerData[index] = itemsFound
+            stickerMeta[index] = {branch=branch, error=nil}
+        else
+            stickerData[index] = {}
+            stickerMeta[index] = {branch=branch, error="GitHub repository could not be read."}
+        end
+        renderStickerGrid()
+    end)
+end
+
+for i,cat in ipairs(STICKER_REPOS) do
+    local b = new("TextButton", {
+        BackgroundColor3 = i==1 and Color3.fromRGB(34,34,38) or Color3.fromRGB(18,18,20),
+        BorderSizePixel=0, Size=UDim2.fromOffset(58,25), Font=Enum.Font.GothamBold,
+        Text=cat.name, TextColor3=Color3.fromRGB(190,190,195), TextSize=7,
+        AutoButtonColor=false, LayoutOrder=i, ZIndex=52,
+    }, StickerTabs)
+    addCorner(b,7)
+    b.MouseButton1Click:Connect(function() selectStickerCategory(i) end)
+end
+
+StickerOpen.MouseButton1Click:Connect(function()
+    StickerPanel.Visible = not StickerPanel.Visible
+    if not StickerPanel.Visible then
+        stickerGeneration += 1
+        return
+    end
+
+    if not stickerLoaded then
+        stickerLoaded = true
+        selectStickerCategory(activeStickerCategory)
+    else
+        selectStickerCategory(activeStickerCategory)
+    end
+end)
+
+-- Floating hide button.
+local Toggle = new("ImageButton", {
+    Name = "SaikiRechatToggle",
+    Size = UDim2.fromOffset(49, 49),
+    Position = UDim2.new(0, 22, 0.65, 0),
+    BackgroundColor3 = Color3.fromRGB(7, 7, 8),
+    BorderSizePixel = 0,
+    Image = HIDE_ASSET,
+    ScaleType = Enum.ScaleType.Crop,
+    AutoButtonColor = false,
+}, ScreenGui)
+addCorner(Toggle, 15)
+addStroke(Toggle, Color3.fromRGB(30, 30, 33), 0.05, 1)
+
+-- -----------------------------------------------------------------------------
+-- Dragging
+-- -----------------------------------------------------------------------------
+local function makeDraggable(handle, target)
+    local dragging = false
+    local dragStart
+    local startPos
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = target.Position
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        local delta = input.Position - dragStart
+        target.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+makeDraggable(Header, Main)
+makeDraggable(Toggle, Toggle)
+
+Toggle.MouseButton1Click:Connect(function()
+    Main.Visible = not Main.Visible
+end)
+
+Close.MouseButton1Click:Connect(function()
+    Main.Visible = false
+end)
+
+-- -----------------------------------------------------------------------------
+-- Message state
+-- -----------------------------------------------------------------------------
+cards = {}
+cardByKey = {}
+layoutCounter = 0
+replyKey = nil
+lastSentAt = -math.huge
+local reactionState = {}
+local updateReactionBadges
+
+local function getAvatar(userId)
+    return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(userId) .. "&width=48&height=48&format=png"
+end
+
+clearReply = function()
+    replyKey = nil
+    ReplyBar.Visible = false
+    ReplyText.Text = ""
+    if Composer and Composer.Parent then
+        tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.12)
+    end
+end
+
+local function setReply(message)
+    replyKey = message.key
+    local preview = tostring(message.message or (message.type == "sticker" and "Sticker") or "")
+    ReplyText.Text = tostring(message.displayName or message.username or "user") .. ": " .. preview
+    ReplyBar.Visible = true
+    tween(Composer, {BackgroundColor3 = Color3.fromRGB(16, 18, 21)}, 0.12)
+    Input:CaptureFocus()
+end
+
+ReplyCancel.MouseButton1Click:Connect(clearReply)
+
+local function copyText(text)
+    if setclipboard then
+        pcall(setclipboard, tostring(text or ""))
+    end
+end
+
+removeCard = function(card)
+    if card and card.Gui then
+        card.Gui:Destroy()
+    end
+    if card and card.Key then
+        cardByKey[card.Key] = nil
+        reactionState[card.Key] = nil
+    end
+end
+
+-- -----------------------------------------------------------------------------
+-- Centered long-press popup
+-- -----------------------------------------------------------------------------
+local PopupShade = new("Frame", {
+    Name = "PopupShade",
+    Visible = false,
+    Size = UDim2.fromScale(1, 1),
+    BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+    BackgroundTransparency = 0.45,
+    BorderSizePixel = 0,
+    ZIndex = 100,
+}, ScreenGui)
+
+local Popup = new("Frame", {
+    Name = "MessageActions",
+    Size = UDim2.fromOffset(280, 270),
+    Position = UDim2.new(0.5, -140, 0.5, -135),
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    BorderSizePixel = 0,
+    ZIndex = 101,
+}, PopupShade)
+addCorner(Popup, 14)
+addStroke(Popup, Color3.fromRGB(39, 39, 43), 0.05, 1)
+
+local PopupTitle = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(16, 11),
+    Size = UDim2.new(1, -32, 0, 15),
+    Font = Enum.Font.GothamBold,
+    Text = "MESSAGE ACTIONS",
+    TextColor3 = Color3.fromRGB(45, 161, 235),
+    TextSize = 9,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 102,
+}, Popup)
+
+local PopupPreview = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(16, 28),
+    Size = UDim2.new(1, -32, 0, 32),
+    Font = Enum.Font.Gotham,
+    Text = "",
+    TextColor3 = Color3.fromRGB(165, 165, 170),
+    TextSize = 10,
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    ZIndex = 102,
+}, Popup)
+
+local PopupButtons = new("Frame", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(12, 67),
+    Size = UDim2.new(1, -24, 0, 39),
+    ZIndex = 102,
+}, Popup)
+
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    Padding = UDim.new(0, 6),
+}, PopupButtons)
+
+local function popupButton(text)
+    local b = new("TextButton", {
+        BackgroundColor3 = Color3.fromRGB(23, 23, 26),
+        BorderSizePixel = 0,
+        Size = UDim2.fromOffset(78, 34),
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextColor3 = Color3.fromRGB(205, 205, 210),
+        TextSize = 9,
+        AutoButtonColor = false,
+        ZIndex = 103,
+    }, PopupButtons)
+    addCorner(b, 9)
+    return b
+end
+
+local ReplyAction = popupButton("REPLY")
+local CopyAction = popupButton("COPY")
+local ReactAction = popupButton("REACT")
+
+local ReactionPanel = new("Frame", {
+    Visible = false,
+    BackgroundColor3 = Color3.fromRGB(18, 18, 21),
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(12, 111),
+    Size = UDim2.new(1, -24, 0, 136),
+    ZIndex = 104,
+}, Popup)
+addCorner(ReactionPanel, 9)
+
+new("UIGridLayout", {
+    CellSize = UDim2.fromOffset(34, 25),
+    CellPadding = UDim2.fromOffset(1, 1),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, ReactionPanel)
+
+local activePopupMessage = nil
+local closePopup
+local setLocalReaction
+local fetchReactionsForMessage
+local loadReactionAssets
+local toggleMyReaction
+
+-- Reaction data helpers. Reactions are stored as one emoji per Firebase UID,
+-- so each user can change their reaction without creating duplicates.
+local function setLocalReaction(messageKey, reaction)
+    reactionState[messageKey] = reactionState[messageKey] or {}
+    reactionState[messageKey][tostring(Auth.uid)] = reaction
+
+    local card = cardByKey[messageKey]
+    if card then
+        updateReactionBadges(card)
+    end
+end
+
+function fetchReactionsForMessage(messageKey)
+    if not Auth.idToken or not messageKey then return false end
+
+    local ok, data = requestJSON(
+        "GET",
+        authURL(
+            "/servers/" .. urlEncode(game.JobId) .. "/reactions/" .. urlEncode(messageKey),
+            Auth.idToken
+        )
+    )
+
+    if not ok then return false end
+
+    local state = {}
+    if type(data) == "table" then
+        for uid, emoji in pairs(data) do
+            if type(uid) == "string" and type(emoji) == "string" and emoji ~= "" then
+                state[uid] = emoji
+            end
+        end
+    end
+
+    reactionState[messageKey] = state
+    local card = cardByKey[messageKey]
+    if card then
+        updateReactionBadges(card)
+    end
+    return true
+end
+
+local function refreshAllReactions()
+    if not Auth.idToken then return end
+
+    -- Only refresh cards currently near the visible viewport. This keeps the
+    -- reaction sync live without generating dozens of HTTP requests every tick.
+    local top = Scroll.AbsolutePosition.Y
+    local bottom = top + Scroll.AbsoluteWindowSize.Y
+
+    for _, card in ipairs(cards) do
+        if card and card.Gui and card.Gui.Parent then
+            local y = card.Gui.AbsolutePosition.Y
+            local h = card.Gui.AbsoluteSize.Y
+            if y + h >= top - 80 and y <= bottom + 80 then
+                task.spawn(function()
+                    fetchReactionsForMessage(card.Key)
+                end)
+            end
+        end
+    end
+end
+
+-- Reaction picker: use cached Twemoji PNGs when the executor supports local assets.
+-- This avoids relying on Roblox's font to render emoji glyphs.
+for i, reaction in ipairs(REACTIONS) do
+    local rb = new("ImageButton", {
+        BackgroundTransparency = 1,
+        AutoButtonColor = false,
+        Image = "",
+        ScaleType = Enum.ScaleType.Fit,
+        ZIndex = 105,
+    }, ReactionPanel)
+    rb.LayoutOrder = i
+
+    local fallback = new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Font = Enum.Font.Gotham,
+        Text = reaction,
+        TextSize = 13,
+        TextColor3 = Color3.fromRGB(220, 220, 225),
+        ZIndex = 106,
+    }, rb)
+
+    rb.MouseButton1Click:Connect(function()
+        if not PopupShade.Visible or not activePopupMessage or not Auth.idToken or not Auth.uid then return end
+
+        local messageKey = activePopupMessage.key
+        -- Instagram-style toggle: tap the same reaction again to remove it.
+        if toggleMyReaction(messageKey, reaction) then
+            closePopup()
+        end
+    end)
+
+end
+
+function toggleMyReaction(messageKey, reaction)
+    if not Auth.idToken or not Auth.uid or not messageKey or not reaction then return false end
+
+    local uid = tostring(Auth.uid)
+    local current = reactionState[messageKey] and reactionState[messageKey][uid]
+    local endpoint = "/servers/" .. urlEncode(game.JobId) .. "/reactions/" .. urlEncode(messageKey) .. "/" .. urlEncode(Auth.uid)
+
+    if current == reaction then
+        local ok = requestJSON("DELETE", authURL(endpoint, Auth.idToken))
+        if ok then
+            reactionState[messageKey] = reactionState[messageKey] or {}
+            reactionState[messageKey][uid] = nil
+            local card = cardByKey[messageKey]
+            if card then updateReactionBadges(card) end
+            return true
+        end
+        return false
+    end
+
+    local ok = requestJSON("PUT", authURL(endpoint, Auth.idToken), reaction)
+    if ok then
+        setLocalReaction(messageKey, reaction)
+        return true
+    end
+    return false
+end
+
+local reactionAssetsLoaded = false
+function loadReactionAssets()
+    if reactionAssetsLoaded then return end
+    reactionAssetsLoaded = true
+    task.spawn(function()
+        for _, child in ipairs(ReactionPanel:GetChildren()) do
+            if child:IsA("ImageButton") then
+                local index = child.LayoutOrder
+                local reaction = REACTIONS[index]
+                if reaction then
+                    local asset = cacheReactionAsset(reaction)
+                    if asset and child.Parent then
+                        child.Image = asset
+                        local fallback = child:FindFirstChildOfClass("TextLabel")
+                        if fallback then fallback.Visible = false end
+                    end
+                end
+                task.wait(0.035)
+            end
+        end
+    end)
+end
+
+function closePopup()
+    PopupShade.Visible = false
+    ReactionPanel.Visible = false
+    activePopupMessage = nil
+end
+
+PopupShade.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input.Position.X < Popup.AbsolutePosition.X or input.Position.X > Popup.AbsolutePosition.X + Popup.AbsoluteSize.X
+            or input.Position.Y < Popup.AbsolutePosition.Y or input.Position.Y > Popup.AbsolutePosition.Y + Popup.AbsoluteSize.Y then
+            closePopup()
+        end
+    end
+end)
+
+ReplyAction.MouseButton1Click:Connect(function()
+    if activePopupMessage then setReply(activePopupMessage) end
+    closePopup()
+end)
+
+CopyAction.MouseButton1Click:Connect(function()
+    if activePopupMessage then
+        copyText(activePopupMessage.message or "")
+    end
+    closePopup()
+end)
+
+ReactAction.MouseButton1Click:Connect(function()
+    ReactionPanel.Visible = not ReactionPanel.Visible
+    if ReactionPanel.Visible then
+        loadReactionAssets()
+    end
+end)
+
+local function openMessagePopup(message)
+    activePopupMessage = message
+    PopupShade:SetAttribute("MessageKey", message.key)
+    PopupPreview.Text = tostring(message.type == "sticker" and "Sticker" or (message.message or ""))
+    ReactionPanel.Visible = true
+    PopupShade.Visible = true
+    loadReactionAssets()
+    task.spawn(function()
+        fetchReactionsForMessage(message.key)
+    end)
+end
+
+-- -----------------------------------------------------------------------------
+-- Compact message renderer
+-- -----------------------------------------------------------------------------
+function updateReactionBadges(card)
+    if not card or not card.ReactionFrame then return end
+    for _, child in ipairs(card.ReactionFrame:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("ImageButton") or child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+
+    local reactions = reactionState[card.Key]
+    local counts = {}
+    local total = 0
+    if type(reactions) == "table" then
+        for _, emoji in pairs(reactions) do
+            if type(emoji) == "string" and emoji ~= "" then
+                counts[emoji] = (counts[emoji] or 0) + 1
+                total += 1
+            end
+        end
+    end
+
+    if total == 0 then
+        card.ReactionFrame.Visible = false
+        card.ReactionFrame.Size = UDim2.fromOffset(0, 0)
+        card.Gui.Size = UDim2.new(1, 0, 0, card.Message._baseHeight or 34)
+        return
+    end
+
+    local order = {}
+    for emoji in pairs(counts) do table.insert(order, emoji) end
+    table.sort(order)
+
+    local width = math.min(145, 24 * #order)
+    card.Gui.Size = UDim2.new(1, 0, 0, (card.Message._baseHeight or 34) + 21)
+    card.ReactionFrame.Visible = true
+    card.ReactionFrame.Size = UDim2.fromOffset(width, 20)
+    card.ReactionFrame.Position = UDim2.fromOffset(
+        card.GroupLeft + (card.Mine and math.max(0, card.BubbleWidth - width) or card.AvatarSize + card.GroupGap),
+        card.BubbleHeight + 1
+    )
+
+    for i, emoji in ipairs(order) do
+        local count = counts[emoji]
+        local pillWidth = count > 1 and 34 or 22
+        local pill = new("Frame", {
+            BackgroundColor3 = Color3.fromRGB(27, 27, 30),
+            BorderSizePixel = 0,
+            Size = UDim2.fromOffset(pillWidth, 18),
+            Position = UDim2.fromOffset((i - 1) * 24, 1),
+            ZIndex = 21,
+        }, card.ReactionFrame)
+        addCorner(pill, 8)
+
+        local reactionButton = new("TextButton", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(pillWidth, 18),
+            Position = UDim2.fromOffset(0, 0),
+            AutoButtonColor = false,
+            Text = "",
+            ZIndex = 22,
+        }, pill)
+
+        new("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(14, 18),
+            Position = UDim2.fromOffset(1, 0),
+            Font = Enum.Font.Gotham,
+            Text = emoji,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            ZIndex = 23,
+        }, reactionButton)
+
+        if count > 1 then
+            new("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(15, 0),
+                Size = UDim2.fromOffset(17, 18),
+                Font = Enum.Font.GothamBold,
+                Text = tostring(count),
+                TextColor3 = Color3.fromRGB(170, 170, 175),
+                TextSize = 8,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 23,
+            }, reactionButton)
+        end
+
+        -- Tapping a reaction badge that belongs to the current user removes it.
+        reactionButton.MouseButton1Click:Connect(function()
+            if not Auth.idToken or not Auth.uid then return end
+            local uid = tostring(Auth.uid)
+            if reactionState[card.Key] and reactionState[card.Key][uid] == emoji then
+                -- Tapping your own reaction badge removes that reaction for everyone.
+                toggleMyReaction(card.Key, emoji)
+            end
+        end)
+    end
+end
+
+renderMessage = function(message)
+    if not message or not message.key or cardByKey[message.key] then return end
+
+    while #cards >= MAX_CARDS do
+        local oldest = table.remove(cards, 1)
+        removeCard(oldest)
+    end
+
+    layoutCounter += 1
+
+    -- Treat a message as ours if either Firebase UID OR Roblox UserId matches.
+    local mine = tostring(message.uid) == tostring(Auth.uid)
+        or tonumber(message.robloxUserId) == tonumber(LocalPlayer.UserId)
+
+    local isSticker = tostring(message.type or "text") == "sticker"
+    local bodyText = tostring(message.message or (isSticker and "Sticker") or "")
+    local displayName = tostring(message.displayName or message.username or "Unknown")
+
+    -------------------------------------------------------------------------
+    -- Text sizing
+    --
+    -- Measure the unwrapped line first, then measure it again using the
+    -- ACTUAL bubble width. This prevents long messages from getting a
+    -- rectangular-looking bubble with text that wraps outside the calculated
+    -- height.
+    -------------------------------------------------------------------------
+    local textSize = 11
+    local font = Enum.Font.GothamBold
+    local maxBodyWidth = 205
+    local minBodyWidth = 46
+
+    local bodyWidth, bodyHeight
+    if isSticker then
+        bodyWidth = 118
+        bodyHeight = 118
+    else
+        local unwrapped = TextService:GetTextSize(
+            bodyText, textSize, font, Vector2.new(10000, 1000)
+        )
+        bodyWidth = math.clamp(unwrapped.X, minBodyWidth, maxBodyWidth)
+        local wrapped = TextService:GetTextSize(
+
+            bodyText, textSize, font, Vector2.new(bodyWidth, 1000)
+        )
+        local lineHeight = 13
+        bodyHeight = math.max(lineHeight, wrapped.Y)
+    end
+
+    -- Reply target. Prefer the rendered target; if it has already scrolled
+    -- out of the 50-card window, use the stored reply metadata if available.
+    local replyPreview = nil
+    if message.replyTo then
+        local targetCard = cardByKey[message.replyTo]
+        if targetCard and targetCard.Message then
+            replyPreview = targetCard.Message
+        else
+            replyPreview = {
+                displayName = "Previous message",
+                message = "Message"
+            }
+        end
+    end
+
+    -- Only other users get a sender name. Your own messages stay clean.
+    local showName = not mine
+
+    -- Keep bubbles content-sized. Long messages become wider + taller;
+    -- short messages remain small pills.
+    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 20, 66, 225)
+
+    local nameHeight = showName and 12 or 0
+    local replyHeight = replyPreview and 32 or 0
+    local topPad = showName and 3 or 0
+    local bodyTop = topPad + nameHeight + (replyPreview and 3 or 2) + replyHeight
+    local bubbleHeight = math.max(
+        28,
+        math.ceil(bodyTop + bodyHeight + 6)
+    )
+
+    local reactionExtra = 0
+    local holderHeight = bubbleHeight + reactionExtra + 3
+
+    local holder = new("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, holderHeight),
+        LayoutOrder = layoutCounter,
+    }, Scroll)
+
+    local avatarSize = 25
+    -- WhatsApp-style alignment: other users stay on the LEFT, our messages
+    -- stay on the RIGHT. The text inside each bubble remains centered separately.
+    local groupGap = 7
+    local groupWidth = bubbleWidth + avatarSize + groupGap
+    local viewportWidth = math.max(0, Scroll.AbsoluteSize.X)
+    local edgePadding = 5
+    local groupLeft
+    if mine then
+        groupLeft = math.max(0, viewportWidth - groupWidth - edgePadding)
+    else
+        groupLeft = edgePadding
+    end
+
+    local avatar = new("ImageLabel", {
+        BackgroundColor3 = Color3.fromRGB(19, 19, 21),
+        BorderSizePixel = 0,
+        Size = UDim2.fromOffset(avatarSize, avatarSize),
+        Position = UDim2.fromOffset(
+            mine and groupLeft + bubbleWidth + groupGap or groupLeft,
+            math.max(1, math.floor((bubbleHeight - avatarSize) / 2))
+        ),
+        Image = getAvatar(message.robloxUserId),
+        ScaleType = Enum.ScaleType.Crop,
+        ClipsDescendants = true,
+    }, holder)
+    addCorner(avatar, math.floor(avatarSize / 2))
+
+    local bubble = new("Frame", {
+        BackgroundColor3 = mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22),
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(
+            mine and groupLeft or groupLeft + avatarSize + groupGap,
+            0
+        ),
+        Size = UDim2.fromOffset(bubbleWidth, bubbleHeight),
+    }, holder)
+
+    -- Small one-line messages get the stadium/pill look.
+    -- Taller messages use a normal rounded rectangle so the corners don't
+    -- become excessively circular and eat into the usable message area.
+    local bubbleRadius = bubbleHeight <= 34 and math.floor(bubbleHeight / 2) or 12
+    addCorner(bubble, bubbleRadius)
+
+    local contentY = 4
+
+    if showName then
+        new("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(10, 3),
+            Size = UDim2.new(1, -20, 0, 9),
+            Font = Enum.Font.GothamBold,
+            Text = displayName,
+            TextColor3 = Color3.fromRGB(55, 161, 228),
+            TextSize = 8,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, bubble)
+        contentY = 14
+    end
+
+    if replyPreview then
+        local quote = new("Frame", {
+            BackgroundColor3 = Color3.fromRGB(27, 27, 30),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(8, contentY),
+            Size = UDim2.new(1, -16, 0, 32),
+        }, bubble)
+        addCorner(quote, 9)
+
+        new("Frame", {
+            BackgroundColor3 = Color3.fromRGB(45, 160, 232),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(0, 5),
+            Size = UDim2.new(0, 2, 1, -10),
+        }, quote)
+
+        new("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(8, 3),
+            Size = UDim2.new(1, -14, 0, 10),
+            Font = Enum.Font.GothamBold,
+            Text = tostring(replyPreview.displayName or "User"),
+            TextColor3 = Color3.fromRGB(55, 161, 228),
+            TextSize = 8,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, quote)
+
+        new("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(8, 14),
+            Size = UDim2.new(1, -14, 0, 14),
+            Font = Enum.Font.GothamBold,
+            Text = tostring(replyPreview.message or "Message"),
+            TextColor3 = Color3.fromRGB(190, 190, 195),
+            TextSize = 9,
+            TextWrapped = false,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, quote)
+
+        contentY = contentY + 35
+    end
+
+    if isSticker then
+        local stickerImage = new("ImageLabel", {
+            BackgroundTransparency=1, Position=UDim2.fromOffset(7, contentY),
+            Size=UDim2.new(1,-14,0,bodyHeight), Image=tostring(message.sticker or ""),
+            ScaleType=Enum.ScaleType.Fit, ZIndex=2
+        }, bubble)
+    else
+        new("TextLabel", {
+            BackgroundTransparency = 1, Position = UDim2.fromOffset(10, contentY),
+            Size = UDim2.new(1, -20, 0, bodyHeight), Font = font, Text = bodyText,
+            TextColor3 = Color3.fromRGB(232, 232, 235), TextSize = textSize, TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
+        }, bubble)
+    end
+
+    local hitbox = new("TextButton", {
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 5,
+    }, bubble)
+
+    local reactionFrame = new("Frame", {
+        Visible = false,
+        BackgroundTransparency = 1,
+        ZIndex = 20,
+        Position = UDim2.fromOffset(
+            mine and (groupLeft + math.max(0, bubbleWidth - 145))
+                or (groupLeft + avatarSize + groupGap),
+            bubbleHeight + 1
+        ),
+        Size = UDim2.fromOffset(0, 0),
+    }, holder)
+
+    local card = {
+        Key = message.key,
+        Gui = holder,
+        Message = message,
+        ReactionFrame = reactionFrame,
+        GroupLeft = groupLeft,
+        BubbleWidth = bubbleWidth,
+        BubbleHeight = bubbleHeight,
+        AvatarSize = avatarSize,
+        GroupGap = groupGap,
+        Mine = mine,
+    }
+    card.Message._baseHeight = bubbleHeight + 3
+
+    -- Long press only opens the centered action popup.
+    local pressStart = 0
+    local holdTriggered = false
+    local activeInput = nil
+
+    hitbox.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+
+        activeInput = input
+        pressStart = os.clock()
+        holdTriggered = false
+
+        task.delay(0.42, function()
+            if activeInput == input
+                and not holdTriggered
+                and os.clock() - pressStart >= 0.40 then
+                holdTriggered = true
+                openMessagePopup(message)
+            end
+        end)
+    end)
+
+    hitbox.InputEnded:Connect(function(input)
+        if input == activeInput then
+            activeInput = nil
+        end
+    end)
+
+    table.insert(cards, card)
+    cardByKey[message.key] = card
+    updateReactionBadges(card)
+
+    task.defer(function()
+        if holder.Parent then
+            Scroll.CanvasPosition = Vector2.new(
+                0,
+                math.max(0, Scroll.AbsoluteCanvasSize.Y)
+            )
+        end
+    end)
+end
+
+-- -----------------------------------------------------------------------------
+-- Server chat
+-- -----------------------------------------------------------------------------
+cutoffKey = nil
+seen = {}
+
+local function getLatestKey()
+    local ok, data = requestJSON(
+        "GET",
+        authURL(
+            "/servers/" .. urlEncode(game.JobId) .. "/messages",
+            Auth.idToken,
+            'orderBy="$key"&limitToLast=1'
+        )
+    )
+    if not ok or type(data) ~= "table" then return nil end
+    for key in pairs(data) do return key end
+    return nil
+end
+
+local function getNewMessages()
+    local extra = 'orderBy="$key"&limitToLast=60'
+    if cutoffKey then
+        extra = 'orderBy="$key"&startAt="' .. urlEncode(cutoffKey) .. '"&limitToFirst=60'
+    end
+
+    local ok, data = requestJSON(
+        "GET",
+        authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken, extra)
+    )
+    if not ok or type(data) ~= "table" then return end
+
+    local list = {}
+    for key, msg in pairs(data) do
+        if type(msg) == "table" then
+            msg.key = key
+            table.insert(list, msg)
+        end
+    end
+
+    table.sort(list, function(a, b)
+        return tostring(a.key) < tostring(b.key)
+    end)
+
+    for _, msg in ipairs(list) do
+        -- startAt is inclusive in Firebase REST, so explicitly discard the
+        -- snapshot key itself. This prevents the last pre-join message from
+        -- appearing as if it was sent by someone after we joined.
+        if (not cutoffKey or tostring(msg.key) > tostring(cutoffKey)) and not seen[msg.key] then
+            seen[msg.key] = true
+            renderMessage(msg)
+            cutoffKey = msg.key
+        end
+    end
+end
+
+showSlowMode = function(seconds)
+    Input.PlaceholderText = string.format("Wait %.1fs...", seconds)
+    tween(Composer, {BackgroundColor3 = Color3.fromRGB(24, 15, 16)}, 0.12)
+    task.delay(math.min(seconds, 1), function()
+        if Composer.Parent then
+            Input.PlaceholderText = "Type message..."
+            tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
+        end
+    end)
+end
+
+local function sendMessage()
+    local textValue = tostring(Input.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if textValue == "" then return end
+
+    local elapsed = os.clock() - lastSentAt
+    if elapsed < SLOW_MODE then
+        showSlowMode(SLOW_MODE - elapsed)
+        return
+    end
+
+    lastSentAt = os.clock()
+
+    local message = {
+        uid = Auth.uid,
+        robloxUserId = profile.robloxUserId,
+        username = profile.username,
+        displayName = profile.displayName,
+        type = "text",
+        message = textValue:sub(1, 1000),
+        timestamp = DateTime.now().UnixTimestampMillis,
+    }
+    if replyKey then
+        message.replyTo = replyKey
+    end
+
+    -- Render locally FIRST. The sender never waits for Firebase/polling to see their own message.
+    local optimisticKey = "local_" .. tostring(message.timestamp) .. "_" .. tostring(math.random(100000, 999999))
+    message.key = optimisticKey
+    message._optimistic = true
+    seen[optimisticKey] = true
+    renderMessage(message)
+
+    Input.Text = ""
+    clearReply()
+
+    -- Do not send client-only UI fields to Firebase.
+    local payload = {
+        uid = message.uid,
+        robloxUserId = message.robloxUserId,
+        username = message.username,
+        displayName = message.displayName,
+        type = message.type,
+        message = message.message,
+        timestamp = message.timestamp,
+    }
+    if message.replyTo then payload.replyTo = message.replyTo end
+
+    task.spawn(function()
+        local ok, result = requestJSON(
+            "POST",
+            authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken),
+            payload
+        )
+
+        if ok then
+            local realKey = type(result) == "table" and result.name or nil
+            local card = cardByKey[optimisticKey]
+
+            if realKey and card then
+                cardByKey[optimisticKey] = nil
+                card.Key = realKey
+                card.Message.key = realKey
+                card.Message._optimistic = nil
+                cardByKey[realKey] = card
+                seen[realKey] = true
+            elseif realKey then
+                seen[realKey] = true
+            end
+        else
+            -- The optimistic card is removed only if the actual write fails.
+            local card = cardByKey[optimisticKey]
+            if card then
+                removeCard(card)
+                for i = #cards, 1, -1 do
+                    if cards[i] == card then
+                        table.remove(cards, i)
+                        break
+                    end
+                end
+            end
+            lastSentAt = -math.huge
+            Input.PlaceholderText = "Send failed"
+            tween(Composer, {BackgroundColor3 = Color3.fromRGB(28, 14, 15)}, 0.12)
+            task.delay(1, function()
+                if Composer.Parent then
+                    Input.PlaceholderText = "Type message..."
+                    tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
+                end
+            end)
+        end
+    end)
+end
+Send.MouseButton1Click:Connect(sendMessage)
+Input.FocusLost:Connect(function(enterPressed)
+    if enterPressed then sendMessage() end
+end)
+
+Input:GetPropertyChangedSignal("Text"):Connect(function()
+    if #Input.Text > 1000 then
+        Input.Text = Input.Text:sub(1, 1000)
+    end
+end)
+
+-- Snapshot the newest existing message. Nothing before this point is rendered.
+cutoffKey = getLatestKey()
+
+-- Poll only for messages created after joining.
+task.spawn(function()
+    local reactionTick = 0
+    while ScreenGui.Parent do
+        task.wait(POLL_RATE)
+        reactionTick += 1
+
+        if not Auth.idToken then
+            refreshAuthToken()
+        end
+
+        if Auth.idToken then
+            getNewMessages()
+
+            -- One small reaction-tree request every ~4.5 seconds instead of
+            -- one request per message. Message cards themselves are never rebuilt.
+            if reactionTick % 2 == 0 then
+                refreshAllReactions()
+            end
+        end
+    end
+end)
+
+getgenv().SaikiRechat = {
+    GUI = ScreenGui,
+    UID = function() return Auth.uid end,
+    ServerID = function() return game.JobId end,
+    SendMessage = sendMessage,
+    Refresh = getNewMessages,
+    Hide = function() Main.Visible = false end,
+    Show = function() Main.Visible = true end,
+}
+
+print("[Saiki Rechat v12] Loaded | Server: " .. tostring(game.JobId))
