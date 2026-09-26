@@ -1668,6 +1668,12 @@ local function renderDMMessage(msg)
     local pressStart = 0
     local holdTriggered = false
     local activeInput = nil
+    hitbox.MouseButton1Click:Connect(function()
+        if not holdTriggered then
+            openMessagePopup(msg, true)
+        end
+        holdTriggered = false
+    end)
     hitbox.InputBegan:Connect(function(input)
         if input.UserInputType ~= Enum.UserInputType.MouseButton1
             and input.UserInputType ~= Enum.UserInputType.Touch then return end
@@ -1725,9 +1731,11 @@ end
 
 sendDM = function(stickerUrl, stickerAsset)
     if not activeDMUser then return false end
-    if not DMAuth.idToken and not dmRefreshAuthToken() then
-        Input.PlaceholderText="DM authentication failed"
-        return false
+    if not DMAuth.idToken then
+        if not dmSignIn() and not dmRefreshAuthToken() then
+            Input.PlaceholderText="DM authentication failed"
+            return false
+        end
     end
 
     local isSticker = type(stickerUrl)=="string" and stickerUrl~=""
@@ -1743,9 +1751,14 @@ sendDM = function(stickerUrl, stickerAsset)
 
     local thread=dmThreadId(LocalPlayer.UserId,activeDMUser.Id)
     if not ensureDMThread() then
-        Input.PlaceholderText="DM setup failed"
-        task.delay(1,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
-        return false
+        if dmSignIn() then
+            saveDMIdentity()
+        end
+        if not ensureDMThread() then
+            Input.PlaceholderText="DM setup failed - Firebase"
+            task.delay(1.5,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+            return false
+        end
     end
 
     local now=DateTime.now().UnixTimestampMillis
@@ -1790,8 +1803,16 @@ sendDM = function(stickerUrl, stickerAsset)
 
     task.spawn(function()
         local ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
-        if not ok and dmRefreshAuthToken() then
-            ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
+        if not ok then
+            if dmRefreshAuthToken() then
+                ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
+            else
+                dmSignIn()
+                saveDMIdentity()
+                if ensureDMThread() then
+                    ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
+                end
+            end
         end
         if ok then
             rememberDMUser(activeDMUser)
