@@ -28,7 +28,7 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
 local GUI_NAME = "SaikiRechat"
-local MAIN_W, MAIN_H = 425, 359
+local MAIN_W, MAIN_H = 445, 359
 local POLL_RATE = 1.5
 local SLOW_MODE = 5
 local MAX_CARDS = 50
@@ -2131,7 +2131,7 @@ local PopupPreview = new("TextLabel", {
     TextSize = 10,
     TextWrapped = true,
     TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Top,
+    TextYAlignment = Enum.TextYAlignment.Center,
     TextTruncate = Enum.TextTruncate.AtEnd,
     ZIndex = 102,
 }, Popup)
