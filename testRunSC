@@ -257,45 +257,28 @@ saveProfile()
 
 -- Separate Firebase project/authentication for Direct Messages. Server Chat
 -- continues using the original Saiki Rechat Firebase project unchanged.
-local DMAuth = {uid=nil, idToken=nil, refreshToken=nil}
+local DMAuth = {uid=tostring(LocalPlayer.UserId), idToken="public", refreshToken=nil}
 
+-- Direct-message Firebase is intentionally used without Firebase Authentication.
+-- The DM database rules must therefore be configured for REST access without auth.
+-- This avoids the separate project's Anonymous Auth dependency, which was causing
+-- "DM sign-in failed" before any message could be sent.
 local function dmAuthURL(path, token, extra)
-    local url = DM_FIREBASE_DB .. path .. ".json?auth=" .. urlEncode(token or "")
-    if extra and extra ~= "" then url = url .. "&" .. extra end
+    local url = DM_FIREBASE_DB .. path .. ".json"
+    if extra and extra ~= "" then url = url .. "?" .. extra end
     return url
 end
 
 local function dmSignIn()
-    local ok, data, raw = requestJSON(
-        "POST",
-        "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. urlEncode(DM_FIREBASE_API_KEY),
-        {returnSecureToken=true}
-    )
-    if not ok or type(data) ~= "table" or not data.localId then
-        warn("Saiki Rechat: Direct Message Firebase sign-in failed: " .. tostring(raw))
-        return false
-    end
-    DMAuth.uid=data.localId
-    DMAuth.idToken=data.idToken
-    DMAuth.refreshToken=data.refreshToken
+    DMAuth.uid = tostring(LocalPlayer.UserId)
+    DMAuth.idToken = "public"
+    DMAuth.refreshToken = nil
     return true
 end
 
 local function dmRefreshAuthToken()
-    if not DMAuth.refreshToken then return false end
-    local body="grant_type=refresh_token&refresh_token=" .. urlEncode(DMAuth.refreshToken)
-    local ok, data=requestJSON(
-        "POST",
-        "https://securetoken.googleapis.com/v1/token?key=" .. urlEncode(DM_FIREBASE_API_KEY),
-        body,
-        "application/x-www-form-urlencoded"
-    )
-    if ok and data and data.id_token then
-        DMAuth.idToken=data.id_token
-        DMAuth.refreshToken=data.refresh_token or DMAuth.refreshToken
-        return true
-    end
-    return false
+    dmSignIn()
+    return true
 end
 
 dmSignIn()
