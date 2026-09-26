@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v14
+    SAIKI RECHAT v15
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -38,6 +38,8 @@ local FIREBASE_API_KEY = "AIzaSyCgvkvar8qhD3zqYC83BW6GHxGQVYoDhrM"
 
 local HIDE_BUTTON_URL = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/SchatButton.jpg"
 local SEND_ICON_URL = "https://github.com/SaikiWithTheBanHammer/ScriptBlox/blob/main/SendIcon.jpg"
+local ULTRON_PFP_URL = "https://github.com/SaikiWithTheBanHammer/Cartoon-XD/blob/main/ullltronnn.jpg"
+local ULTRON_NAME = "Saiki's Ultron"
 local CACHE_FOLDER = "SaikiRechatCache"
 local EMOJI_CACHE_FOLDER = CACHE_FOLDER .. "/reactions"
 local STICKER_CACHE_FOLDER = CACHE_FOLDER .. "/stickers"
@@ -181,6 +183,7 @@ end
 
 local HIDE_ASSET = cacheImage("schat_button.jpg", HIDE_BUTTON_URL)
 local SEND_ASSET = cacheImage("send_icon.jpg", SEND_ICON_URL)
+local ULTRON_ASSET = cacheImage("ultron_pfp.jpg", ULTRON_PFP_URL)
 
 -- -----------------------------------------------------------------------------
 -- Firebase anonymous auth
@@ -1557,12 +1560,18 @@ renderMessage = function(message)
     layoutCounter += 1
 
     -- Treat a message as ours if either Firebase UID OR Roblox UserId matches.
-    local mine = tostring(message.uid) == tostring(Auth.uid)
+    local isUltron = message._ultron == true
+        or tostring(message.senderType or "") == "ultron"
+        or tostring(message.displayName or "") == ULTRON_NAME
+
+    local mine = not isUltron and (
+        tostring(message.uid) == tostring(Auth.uid)
         or tonumber(message.robloxUserId) == tonumber(LocalPlayer.UserId)
+    )
 
     local isSticker = tostring(message.type or "text") == "sticker"
     local bodyText = tostring(message.message or (isSticker and "Sticker") or "")
-    local displayName = tostring(message.displayName or message.username or "Unknown")
+    local displayName = isUltron and ULTRON_NAME or tostring(message.displayName or message.username or "Unknown")
 
     -------------------------------------------------------------------------
     -- Text sizing
@@ -1656,14 +1665,14 @@ renderMessage = function(message)
             mine and groupLeft + bubbleWidth + groupGap or groupLeft,
             math.max(1, math.floor((bubbleHeight - avatarSize) / 2))
         ),
-        Image = getAvatar(message.robloxUserId),
+        Image = isUltron and tostring(message._ultronAsset or ULTRON_ASSET or "") or getAvatar(message.robloxUserId),
         ScaleType = Enum.ScaleType.Crop,
         ClipsDescendants = true,
     }, holder)
     addCorner(avatar, math.floor(avatarSize / 2))
 
     local bubble = new("Frame", {
-        BackgroundColor3 = mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22),
+        BackgroundColor3 = isUltron and Color3.fromRGB(185, 32, 38) or (mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22)),
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(
             mine and groupLeft or groupLeft + avatarSize + groupGap,
@@ -1687,7 +1696,7 @@ renderMessage = function(message)
             Size = UDim2.new(1, -20, 0, 9),
             Font = Enum.Font.GothamBold,
             Text = displayName,
-            TextColor3 = Color3.fromRGB(55, 161, 228),
+            TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(55, 161, 228),
             TextSize = 8,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
@@ -1761,7 +1770,7 @@ renderMessage = function(message)
         new("TextLabel", {
             BackgroundTransparency = 1, Position = UDim2.fromOffset(10, contentY),
             Size = UDim2.new(1, -20, 0, bodyHeight), Font = font, Text = bodyText,
-            TextColor3 = Color3.fromRGB(232, 232, 235), TextSize = textSize, TextWrapped = true,
+            TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(232, 232, 235), TextSize = textSize, TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
         }, bubble)
     end
@@ -1912,6 +1921,88 @@ showSlowMode = function(seconds)
     end)
 end
 
+local ULTRON_JOIN_PHRASES = {
+    "%s Just Crashed into Chat",
+    "%s Just Landed, everyone Say Hi!",
+    "YOOOOOOOO %s WB yawrr!!!",
+    "%s Just Pulled Up — Make Some Noise!",
+    "%s Has Entered the Server — W Chat!",
+    "%s Touchdown! Welcome to the chaos!",
+}
+
+local function sendUltronJoinMessage()
+    if not Auth.idToken or not Auth.uid then return end
+
+    local template = ULTRON_JOIN_PHRASES[math.random(1, #ULTRON_JOIN_PHRASES)]
+    local joinText = string.format(template, tostring(LocalPlayer.DisplayName))
+    local now = DateTime.now().UnixTimestampMillis
+
+    -- This is an app-level Ultron identity inside Saiki Rechat. It is stored
+    -- through the current anonymous Firebase client, then every Rechat client
+    -- renders it as Saiki's Ultron instead of as the joining player.
+    local message = {
+        uid = Auth.uid,
+        robloxUserId = 0,
+        username = ULTRON_NAME,
+        displayName = ULTRON_NAME,
+        type = "text",
+        message = joinText,
+        timestamp = now,
+        _ultron = true,
+        _ultronAsset = ULTRON_ASSET,
+    }
+
+    local optimisticKey = "local_ultron_" .. tostring(now) .. "_" .. tostring(math.random(100000, 999999))
+    message.key = optimisticKey
+    message._optimistic = true
+    seen[optimisticKey] = true
+    renderMessage(message)
+
+    local payload = {
+        uid = message.uid,
+        robloxUserId = 0,
+        username = ULTRON_NAME,
+        displayName = ULTRON_NAME,
+        type = "text",
+        message = joinText,
+        timestamp = now,
+    }
+
+    task.spawn(function()
+        local ok, result = requestJSON(
+            "POST",
+            authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken),
+            payload
+        )
+
+        if ok then
+            local realKey = type(result) == "table" and result.name or nil
+            local card = cardByKey[optimisticKey]
+            if realKey and card then
+                cardByKey[optimisticKey] = nil
+                card.Key = realKey
+                card.Message.key = realKey
+                card.Message._optimistic = nil
+                cardByKey[realKey] = card
+                seen[realKey] = true
+            elseif realKey then
+                seen[realKey] = true
+            end
+        else
+            local card = cardByKey[optimisticKey]
+            if card then
+                removeCard(card)
+                for i = #cards, 1, -1 do
+                    if cards[i] == card then
+                        table.remove(cards, i)
+                        break
+                    end
+                end
+            end
+        end
+    end)
+end
+
 local function sendMessage()
     local textValue = tostring(Input.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if textValue == "" then return end
@@ -2018,6 +2109,10 @@ end)
 -- Snapshot the newest existing message. Nothing before this point is rendered.
 cutoffKey = getLatestKey()
 
+-- Announce this client entering the current JobId server after the pre-join
+-- snapshot is taken, so the join message itself is treated as new.
+task.delay(0.35, sendUltronJoinMessage)
+
 -- Poll only for messages created after joining.
 task.spawn(function()
     local reactionTick = 0
@@ -2053,4 +2148,4 @@ getgenv().SaikiRechat = {
     Show = function() Main.Visible = true end,
 }
 
-print("[Saiki Rechat v14] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v15] Loaded | Server: " .. tostring(game.JobId))
