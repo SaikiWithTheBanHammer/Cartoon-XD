@@ -491,7 +491,8 @@ local DMSearch = new("TextBox", {
     BorderSizePixel = 0,
     ClearTextOnFocus = false,
     Font = Enum.Font.Gotham,
-    PlaceholderText = "Enter Name of some one in your Friends List",
+    Text = "",
+    PlaceholderText = "",
     PlaceholderColor3 = Color3.fromRGB(78, 78, 83),
     TextColor3 = Color3.fromRGB(232, 232, 235),
     TextSize = 10,
@@ -621,7 +622,8 @@ local Input = new("TextBox", {
     Size = UDim2.new(1, -58, 1, 0),
     ClearTextOnFocus = false,
     Font = Enum.Font.GothamBold,
-    PlaceholderText = "Type message...",
+    Text = "",
+    PlaceholderText = "",
     PlaceholderColor3 = Color3.fromRGB(78, 78, 83),
     TextColor3 = Color3.fromRGB(232, 232, 235),
     TextSize = 11,
@@ -1461,6 +1463,8 @@ saveDMIdentity()
 loadDMHistory()
 task.spawn(syncDMIncomingHistory)
 
+local ensureDMThread
+
 local function addDMCandidate(map, userId, username, displayName, source)
     userId = tonumber(userId)
     if not userId or userId == LocalPlayer.UserId then return end
@@ -1526,6 +1530,11 @@ local function makeDMRow(parent, candidate, compact)
             if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
         end
         Input.PlaceholderText="Message @"..candidate.Username.."..."
+        -- Create/restore the lightweight thread metadata before reading it.
+        -- This lets an existing DM conversation load immediately even when
+        -- the user has not sent a new message in that conversation.
+        if not DMAuth.idToken then dmSignIn() end
+        ensureDMThread()
         loadDMMessages()
     end)
     return row
@@ -1614,7 +1623,6 @@ end
 
 local loadDMMessages
 local openMessagePopup
-
 local function renderDMMessage(msg)
     if not msg or not msg.key or dmSeen[msg.key] then return end
     dmSeen[msg.key] = true
@@ -1817,7 +1825,7 @@ loadDMMessages = function()
     end
 end
 
-local function ensureDMThread()
+ensureDMThread = function()
     if not activeDMUser then return false end
     if not DMAuth.idToken then
         if not dmSignIn() then return false end
@@ -1989,7 +1997,7 @@ local function closeDMConversation()
     Composer.Visible=false
     StickerOpen.Visible=false
     StickerPanel.Visible=false
-    Input.PlaceholderText="Type message..."
+    Input.PlaceholderText=""
     Input.Text=""
     renderDMResults()
 end
@@ -2006,7 +2014,7 @@ local function switchTab(tab)
         Input.Text=""
         Composer.Visible=activeDMUser ~= nil
         StickerOpen.Visible=activeDMUser ~= nil
-        Input.PlaceholderText=activeDMUser and ("Message @"..activeDMUser.Username.."...") or "Type message..."
+        Input.PlaceholderText=activeDMUser and ("Message @"..activeDMUser.Username.."...") or ""
         if not activeDMUser then
             DMHeader.Visible=false
             DMConversation.Visible=false
