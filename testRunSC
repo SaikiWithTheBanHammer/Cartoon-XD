@@ -1529,7 +1529,7 @@ local function makeDMRow(parent, candidate, compact)
         for _, child in ipairs(DMConversation:GetChildren()) do
             if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
         end
-        Input.PlaceholderText="Message @"..candidate.Username.."..."
+        Input.PlaceholderText=""
         -- Create/restore the lightweight thread metadata before reading it.
         -- This lets an existing DM conversation load immediately even when
         -- the user has not sent a new message in that conversation.
@@ -1904,10 +1904,10 @@ sendDM = function(stickerUrl, stickerAsset)
         end
     end
     if not metaOK then
-        Input.PlaceholderText = "DM thread failed: " .. tostring(metaRaw or "Firebase error"):sub(1, 70)
+        Input.PlaceholderText = ""
         task.delay(2, function()
             if Composer.Parent and activeTab == "dm" and activeDMUser then
-                Input.PlaceholderText = "Message @" .. activeDMUser.Username .. "..."
+                Input.PlaceholderText = ""
             end
         end)
         return false
@@ -1964,10 +1964,10 @@ sendDM = function(stickerUrl, stickerAsset)
     end
 
     if not ok then
-        Input.PlaceholderText = "DM send failed: " .. tostring(raw or "Firebase error"):sub(1, 70)
+        Input.PlaceholderText = ""
         task.delay(2, function()
             if Composer.Parent and activeTab == "dm" and activeDMUser then
-                Input.PlaceholderText = "Message @" .. activeDMUser.Username .. "..."
+                Input.PlaceholderText = ""
             end
         end)
         return false
@@ -2014,7 +2014,7 @@ local function switchTab(tab)
         Input.Text=""
         Composer.Visible=activeDMUser ~= nil
         StickerOpen.Visible=activeDMUser ~= nil
-        Input.PlaceholderText=activeDMUser and ("Message @"..activeDMUser.Username.."...") or ""
+        Input.PlaceholderText=""
         if not activeDMUser then
             DMHeader.Visible=false
             DMConversation.Visible=false
