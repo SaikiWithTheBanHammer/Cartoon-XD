@@ -32,9 +32,15 @@ local MAIN_W, MAIN_H = 425, 359
 local POLL_RATE = 1.5
 local SLOW_MODE = 5
 local MAX_CARDS = 50
+local activeTab = "server"
+local activeDMUser = nil
+local dmCandidates = {}
+local dmSeen = {}
 
 local FIREBASE_DB = "https://sxkicxat-default-rtdb.asia-southeast1.firebasedatabase.app"
 local FIREBASE_API_KEY = "AIzaSyCgvkvar8qhD3zqYC83BW6GHxGQVYoDhrM"
+local DM_FIREBASE_DB = "https://sxkidirect-default-rtdb.asia-southeast1.firebasedatabase.app"
+local DM_FIREBASE_API_KEY = "AIzaSyALza0_s-MNzaYMrH15WJGAZMJ_RYW4"
 
 local HIDE_BUTTON_URL = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/SchatButton.jpg"
 local SEND_ICON_URL = "https://github.com/SaikiWithTheBanHammer/ScriptBlox/blob/main/SendIcon.jpg"
@@ -246,6 +252,51 @@ local function saveProfile()
 end
 saveProfile()
 
+-- Separate Firebase project/authentication for Direct Messages. Server Chat
+-- continues using the original Saiki Rechat Firebase project unchanged.
+local DMAuth = {uid=nil, idToken=nil, refreshToken=nil}
+
+local function dmAuthURL(path, token, extra)
+    local url = DM_FIREBASE_DB .. path .. ".json?auth=" .. urlEncode(token or "")
+    if extra and extra ~= "" then url = url .. "&" .. extra end
+    return url
+end
+
+local function dmSignIn()
+    local ok, data, raw = requestJSON(
+        "POST",
+        "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. urlEncode(DM_FIREBASE_API_KEY),
+        {returnSecureToken=true}
+    )
+    if not ok or type(data) ~= "table" or not data.localId then
+        warn("Saiki Rechat: Direct Message Firebase sign-in failed: " .. tostring(raw))
+        return false
+    end
+    DMAuth.uid=data.localId
+    DMAuth.idToken=data.idToken
+    DMAuth.refreshToken=data.refreshToken
+    return true
+end
+
+local function dmRefreshAuthToken()
+    if not DMAuth.refreshToken then return false end
+    local body="grant_type=refresh_token&refresh_token=" .. urlEncode(DMAuth.refreshToken)
+    local ok, data=requestJSON(
+        "POST",
+        "https://securetoken.googleapis.com/v1/token?key=" .. urlEncode(DM_FIREBASE_API_KEY),
+        body,
+        "application/x-www-form-urlencoded"
+    )
+    if ok and data and data.id_token then
+        DMAuth.idToken=data.id_token
+        DMAuth.refreshToken=data.refresh_token or DMAuth.refreshToken
+        return true
+    end
+    return false
+end
+
+dmSignIn()
+
 -- -----------------------------------------------------------------------------
 -- GUI helpers
 -- -----------------------------------------------------------------------------
@@ -347,6 +398,24 @@ local Header = new("Frame", {
     Active = true,
 }, Main)
 
+-- Server Chat / DM switch. One tap changes between the two views.
+local TabSwitch = new("TextButton", {
+    Name = "TabSwitch",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromOffset(28, 23),
+    Size = UDim2.fromOffset(32, 32),
+    BackgroundColor3 = Color3.fromRGB(16, 16, 19),
+    BorderSizePixel = 0,
+    Font = Enum.Font.GothamBold,
+    Text = "DM",
+    TextColor3 = Color3.fromRGB(225, 225, 230),
+    TextSize = 9,
+    AutoButtonColor = false,
+    ZIndex = 12,
+}, Header)
+addCorner(TabSwitch, 999)
+addStroke(TabSwitch, Color3.fromRGB(65, 65, 72), 0.35, 1)
+
 -- Anchor / Unanchor button, matching the Saiki Emotes behavior.
 local anchored = false
 
@@ -416,6 +485,87 @@ new("UIPadding", {
     PaddingLeft = UDim.new(0, 1),
     PaddingRight = UDim.new(0, 1),
 }, Scroll)
+
+-- -----------------------------------------------------------------------------
+-- Direct Messages UI
+-- -----------------------------------------------------------------------------
+local DMRoot = new("Frame", {
+    Name = "DMRoot",
+    Position = UDim2.fromOffset(12, 49),
+    Size = UDim2.new(1, -24, 1, -103),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Visible = false,
+}, Main)
+
+local DMSearch = new("TextBox", {
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.new(1, 0, 0, 34),
+    BorderSizePixel = 0,
+    ClearTextOnFocus = false,
+    Font = Enum.Font.Gotham,
+    PlaceholderText = "Search username or display name...",
+    PlaceholderColor3 = Color3.fromRGB(78, 78, 83),
+    TextColor3 = Color3.fromRGB(232, 232, 235),
+    TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, DMRoot)
+addCorner(DMSearch, 10)
+addStroke(DMSearch, Color3.fromRGB(30, 30, 33), 0.1, 1)
+
+local DMResults = new("ScrollingFrame", {
+    Name = "Results",
+    Position = UDim2.fromOffset(0, 41),
+    Size = UDim2.new(1, 0, 1, -41),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 2,
+    ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45),
+    CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, DMRoot)
+new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder}, DMResults)
+new("UIPadding", {PaddingBottom = UDim.new(0, 5)}, DMResults)
+
+local DMHeader = new("Frame", {
+    Name = "ConversationHeader",
+    Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.new(1, 0, 0, 34),
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    BorderSizePixel = 0,
+    Visible = false,
+}, DMRoot)
+addCorner(DMHeader, 10)
+addStroke(DMHeader, Color3.fromRGB(30, 30, 33), 0.1, 1)
+
+local DMBack = new("TextButton", {
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(6, 3), Size = UDim2.fromOffset(28, 28),
+    Font = Enum.Font.GothamBold, Text = "<", TextColor3 = Color3.fromRGB(170, 170, 175), TextSize = 14, AutoButtonColor = false,
+}, DMHeader)
+
+local DMTarget = new("TextLabel", {
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 4), Size = UDim2.new(1, -46, 0, 13),
+    Font = Enum.Font.GothamBold, Text = "Direct Message", TextColor3 = Color3.fromRGB(230, 230, 235), TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+}, DMHeader)
+
+local DMTargetUser = new("TextLabel", {
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 17), Size = UDim2.new(1, -46, 0, 10),
+    Font = Enum.Font.Gotham, Text = "", TextColor3 = Color3.fromRGB(95, 95, 100), TextSize = 7,
+    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+}, DMHeader)
+
+local DMConversation = new("ScrollingFrame", {
+    Name = "Conversation",
+    Position = UDim2.fromOffset(0, 41),
+    Size = UDim2.new(1, 0, 1, -41),
+    BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
+    ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y, Visible = false,
+}, DMRoot)
+new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center}, DMConversation)
+new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 7)}, DMConversation)
 
 -- Composer.
 local Composer = new("Frame", {
@@ -1128,6 +1278,215 @@ Toggle.MouseButton1Click:Connect(function()
     Main.Visible = not Main.Visible
 end)
 
+
+-- -----------------------------------------------------------------------------
+-- Direct Messages logic
+-- -----------------------------------------------------------------------------
+local function dmThreadId(a, b)
+    a, b = tostring(a), tostring(b)
+    if tonumber(a) and tonumber(b) then
+        if tonumber(a) > tonumber(b) then a, b = b, a end
+    elseif a > b then
+        a, b = b, a
+    end
+    return a .. "_" .. b
+end
+
+local function saveDMIdentity()
+    local data = {
+        authUid = DMAuth.uid,
+        robloxUserId = tostring(LocalPlayer.UserId),
+        username = LocalPlayer.Name,
+        displayName = LocalPlayer.DisplayName,
+        updatedAt = DateTime.now().UnixTimestampMillis,
+    }
+    if DMAuth.idToken then
+        requestJSON("PUT", dmAuthURL("/userLinks/" .. urlEncode(LocalPlayer.UserId), DMAuth.idToken), data)
+    end
+end
+saveDMIdentity()
+
+local function addDMCandidate(map, userId, username, displayName, source)
+    userId = tonumber(userId)
+    if not userId or userId == LocalPlayer.UserId then return end
+    local key = tostring(userId)
+    if not map[key] then
+        map[key] = {Id=userId, Username=tostring(username or ""), DisplayName=tostring(displayName or username or "Unknown"), Source=source}
+    else
+        if map[key].Username == "" then map[key].Username = tostring(username or "") end
+        if map[key].DisplayName == "" or map[key].DisplayName == "Unknown" then map[key].DisplayName = tostring(displayName or username or "Unknown") end
+    end
+end
+
+local function loadDMCandidates()
+    local map = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        addDMCandidate(map, player.UserId, player.Name, player.DisplayName, "Server")
+    end
+
+    task.spawn(function()
+        local ok, pages = pcall(function() return Players:GetFriendsAsync(LocalPlayer.UserId) end)
+        if ok and pages then
+            local loops = 0
+            repeat
+                loops += 1
+                for _, friend in ipairs(pages:GetCurrentPage()) do
+                    addDMCandidate(map, friend.Id, friend.Username, friend.DisplayName, "Friend")
+                end
+                if pages.IsFinished or loops >= 8 then break end
+                local advanced = pcall(function() pages:AdvanceToNextPageAsync() end)
+                if not advanced then break end
+            until false
+        end
+        dmCandidates = map
+        if activeTab == "dm" and not activeDMUser then
+            renderDMResults()
+        end
+    end)
+
+    dmCandidates = map
+    renderDMResults()
+end
+
+local function clearDMResults()
+    for _, child in ipairs(DMResults:GetChildren()) do
+        if child:IsA("GuiButton") or child:IsA("ImageButton") or child:IsA("ImageLabel") then child:Destroy() end
+    end
+end
+
+local function renderDMResults()
+    clearDMResults()
+    if activeDMUser then return end
+    local q = string.lower(tostring(DMSearch.Text or ""))
+    local list = {}
+    for _, candidate in pairs(dmCandidates) do
+        if q == "" or string.find(string.lower(candidate.DisplayName), q, 1, true) or string.find(string.lower(candidate.Username), q, 1, true) then
+            table.insert(list, candidate)
+        end
+    end
+    table.sort(list, function(a,b) return string.lower(a.DisplayName) < string.lower(b.DisplayName) end)
+    for _, c in ipairs(list) do
+        local row = new("TextButton", {BackgroundColor3=Color3.fromRGB(15,15,17), BorderSizePixel=0, Size=UDim2.new(1,-4,0,42), Font=Enum.Font.Gotham, Text="", AutoButtonColor=false}, DMResults)
+        addCorner(row,10)
+        local avatar = new("ImageLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(6,5), Size=UDim2.fromOffset(32,32), Image=getAvatar(c.Id), ScaleType=Enum.ScaleType.Crop}, row)
+        addCorner(avatar,16)
+        new("TextLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(46,5), Size=UDim2.new(1,-54,0,14), Font=Enum.Font.GothamBold, Text=c.DisplayName, TextColor3=Color3.fromRGB(225,225,230), TextSize=9, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd}, row)
+        new("TextLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(46,20), Size=UDim2.new(1,-54,0,11), Font=Enum.Font.Gotham, Text="@"..c.Username.."  •  "..tostring(c.Source or ""), TextColor3=Color3.fromRGB(92,92,98), TextSize=7, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd}, row)
+        row.MouseButton1Click:Connect(function()
+            activeDMUser = c
+            DMSearch.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
+            DMTarget.Text=c.DisplayName; DMTargetUser.Text="@"..c.Username
+            Composer.Visible=true
+            dmSeen={}
+            for _, child in ipairs(DMConversation:GetChildren()) do if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end end
+            Input.PlaceholderText="Message @"..c.Username.."..."
+            loadDMMessages()
+        end)
+    end
+end
+
+local loadDMMessages
+
+local function renderDMMessage(msg)
+    if not msg or not msg.key or dmSeen[msg.key] then return end
+    dmSeen[msg.key] = true
+    local mine = tonumber(msg.senderId) == tonumber(LocalPlayer.UserId)
+    local textValue = tostring(msg.message or "")
+    local width = math.clamp(TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(10000,1000)).X + 20, 66, 225)
+    local wrap = TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(width - 20,10000))
+    local height = math.max(28, math.ceil(wrap.Y) + 18)
+    local holder = new("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,height+3)}, DMConversation)
+    local bubble = new("Frame", {BackgroundColor3=mine and Color3.fromRGB(31,31,34) or Color3.fromRGB(20,20,22), BorderSizePixel=0, Position=UDim2.new(mine and 1 or 0, mine and -width-3 or 3, 0, 0), Size=UDim2.fromOffset(width,height)}, holder)
+    addCorner(bubble, height <= 34 and math.floor(height/2) or 12)
+    new("TextLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(10, mine and 5 or 3), Size=UDim2.new(1,-20,1,-8), Font=Enum.Font.GothamBold, Text=textValue, TextColor3=Color3.fromRGB(232,232,235), TextSize=11, TextWrapped=true, TextYAlignment=Enum.TextYAlignment.Top, TextXAlignment=Enum.TextXAlignment.Center, TextTruncate=Enum.TextTruncate.None}, bubble)
+    task.defer(function() if DMConversation.Parent then DMConversation.CanvasPosition=Vector2.new(0,math.max(0,DMConversation.AbsoluteCanvasSize.Y)) end end)
+end
+
+loadDMMessages = function()
+    if not activeDMUser or not DMAuth.idToken then return end
+    local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
+    local extra='orderBy="$key"&limitToLast=60'
+    local ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
+    if not ok and dmRefreshAuthToken() then
+        ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
+    end
+    if not ok then return end
+    for key, msg in pairs(data or {}) do
+        if type(msg)=="table" then msg.key=key; renderDMMessage(msg) end
+    end
+end
+
+local function ensureDMThread()
+    if not activeDMUser or not DMAuth.idToken then return false end
+    local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
+    local a, b = tostring(LocalPlayer.UserId), tostring(activeDMUser.Id)
+    if tonumber(a) and tonumber(b) and tonumber(a) > tonumber(b) then a, b = b, a end
+    local meta = {
+        memberA = a,
+        memberB = b,
+        createdBy = tostring(LocalPlayer.UserId),
+        updatedAt = DateTime.now().UnixTimestampMillis,
+    }
+    return requestJSON("PUT", dmAuthURL("/dmThreads/"..urlEncode(thread).."/meta", DMAuth.idToken), meta)
+end
+
+local function sendDM()
+    if not activeDMUser then return false end
+    local textValue = tostring(Input.Text or "")
+    if textValue:gsub("%s+", "") == "" then return false end
+    local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
+    if not ensureDMThread() then
+        Input.PlaceholderText="DM setup failed"
+        task.delay(1,function() if Composer.Parent and activeTab=="dm" then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+        return false
+    end
+    local payload={senderId=tostring(LocalPlayer.UserId),senderUsername=LocalPlayer.Name,senderDisplayName=LocalPlayer.DisplayName,recipientId=tostring(activeDMUser.Id),recipientUsername=activeDMUser.Username,recipientDisplayName=activeDMUser.DisplayName,message=textValue,timestamp=DateTime.now().UnixTimestampMillis}
+    local ok = requestJSON("POST", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken), payload)
+    if ok then
+        Input.Text=""
+        loadDMMessages()
+    else
+        Input.PlaceholderText="DM send failed"
+        task.delay(1,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+    end
+    return ok
+end
+
+local function closeDMConversation()
+    activeDMUser=nil
+    DMHeader.Visible=false; DMConversation.Visible=false; DMSearch.Visible=true; DMResults.Visible=true
+    Composer.Visible=false
+    Input.PlaceholderText="Type message..."
+    Input.Text=""
+    renderDMResults()
+end
+
+local function switchTab(tab)
+    activeTab=tab
+    local dm=tab=="dm"
+    Scroll.Visible=not dm
+    DMRoot.Visible=dm
+    StickerOpen.Visible=not dm
+    TabSwitch.Text=dm and "CHAT" or "DM"
+    if dm then
+        clearReply()
+        Input.Text=""
+        Composer.Visible=activeDMUser ~= nil
+        Input.PlaceholderText=activeDMUser and ("Message @"..activeDMUser.Username.."...") or "Type message..."
+        loadDMCandidates()
+        renderDMResults()
+    else
+        Composer.Visible=true
+        Input.Text=""
+        Input.PlaceholderText="Type message..."
+    end
+end
+
+DMBack.MouseButton1Click:Connect(closeDMConversation)
+DMSearch:GetPropertyChangedSignal("Text"):Connect(function() if activeTab=="dm" and not activeDMUser then renderDMResults() end end)
+Players.PlayerAdded:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
+Players.PlayerRemoving:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
+TabSwitch.MouseButton1Click:Connect(function() switchTab(activeTab=="server" and "dm" or "server") end)
 
 -- -----------------------------------------------------------------------------
 -- Message state
@@ -2041,6 +2400,9 @@ local function sendUltronJoinMessage()
 end
 
 local function sendMessage()
+    if activeTab == "dm" then
+        return sendDM()
+    end
     -- Preserve the textbox contents exactly. Only use a trimmed copy to decide
     -- whether the message is effectively empty; never trim or truncate what is sent.
     local textValue = tostring(Input.Text or "")
@@ -2143,8 +2505,14 @@ end)
 -- the full TextBox value, and changing Input.Text while the user is typing was
 -- the cause of the tail of longer messages being silently discarded.
 
+-- Start in Server Chat with the normal composer visible.
+Composer.Visible = true
+
 -- Snapshot the newest existing message. Nothing before this point is rendered.
 cutoffKey = getLatestKey()
+
+-- Load the DM contact pool in the background.
+loadDMCandidates()
 
 -- Announce this client entering the current JobId server after the pre-join
 -- snapshot is taken, so the join message itself is treated as new.
@@ -2162,11 +2530,16 @@ task.spawn(function()
         end
 
         if Auth.idToken then
-            getNewMessages()
+            if activeTab == "server" then
+                getNewMessages()
+            elseif activeTab == "dm" and activeDMUser then
+                if not DMAuth.idToken then dmRefreshAuthToken() end
+                loadDMMessages()
+            end
 
             -- One small reaction-tree request every ~4.5 seconds instead of
             -- one request per message. Message cards themselves are never rebuilt.
-            if reactionTick % 2 == 0 then
+            if activeTab == "server" and reactionTick % 2 == 0 then
                 refreshAllReactions()
             end
         end
