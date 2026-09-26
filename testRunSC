@@ -34,6 +34,7 @@ local SLOW_MODE = 5
 local MAX_CARDS = 50
 local activeTab = "server"
 local activeDMUser = nil
+local dmLastSentAt = -math.huge
 local dmCandidates = {}
 local dmHistory = {}
 local dmSeen = {}
@@ -1150,7 +1151,7 @@ local function renderStickerGrid()
             TextSize=10, ZIndex=53,
         }, b)
         buttons[i] = b
-        b.MouseButton1Click:Connect(function() sendSticker(sticker) end)
+        b.Activated:Connect(function() sendSticker(sticker) end)
     end
 
     task.spawn(function()
@@ -1257,7 +1258,7 @@ for i,cat in ipairs(STICKER_REPOS) do
     b.MouseButton1Click:Connect(function() selectStickerCategory(i) end)
 end
 
-StickerOpen.MouseButton1Click:Connect(function()
+StickerOpen.Activated:Connect(function()
     StickerPanel.Visible = not StickerPanel.Visible
     if not StickerPanel.Visible then
         stickerGeneration += 1
@@ -1741,112 +1742,160 @@ local function ensureDMThread()
 end
 
 sendDM = function(stickerUrl, stickerAsset)
-    if not activeDMUser then return false end
-    if not DMAuth.idToken then
-        if not dmSignIn() and not dmRefreshAuthToken() then
-            Input.PlaceholderText="DM authentication failed"
-            return false
-        end
-    end
+    if activeTab ~= "dm" or not activeDMUser then return false end
 
-    local isSticker = type(stickerUrl)=="string" and stickerUrl~=""
+    local isSticker = type(stickerUrl) == "string" and stickerUrl ~= ""
     local textValue = tostring(Input.Text or "")
-    if not isSticker and textValue:gsub("%s+","")=="" then return false end
-
-    local elapsed=os.clock()-lastSentAt
-    if elapsed<SLOW_MODE then
-        showSlowMode(SLOW_MODE-elapsed)
+    if not isSticker and textValue:gsub("%s+", "") == "" then
         return false
     end
-    lastSentAt=os.clock()
 
-    local thread=dmThreadId(LocalPlayer.UserId,activeDMUser.Id)
-    if not ensureDMThread() then
-        dmSignIn()
-        saveDMIdentity()
-        if not ensureDMThread() then
-            Input.PlaceholderText="DM setup failed - check Firebase rules"
-            task.delay(2,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
-            lastSentAt=-math.huge
+    -- DM has its own send timer. Server-chat sends must never block a DM.
+    local elapsed = os.clock() - (dmLastSentAt or -math.huge)
+    if elapsed < SLOW_MODE then
+        return false
+    end
+
+    -- Always obtain a usable DM Firebase session before attempting the write.
+    if not DMAuth.idToken or not DMAuth.uid then
+        if not dmSignIn() then
+            Input.PlaceholderText = "DM Firebase sign-in failed"
             return false
         end
     end
+    if not saveDMIdentity() then
+        if not dmRefreshAuthToken() or not saveDMIdentity() then
+            dmSignIn()
+            if not saveDMIdentity() then
+                Input.PlaceholderText = "DM account setup failed"
+                return false
+            end
+        end
+    end
 
-    local now=DateTime.now().UnixTimestampMillis
-    local message={
-        senderId=tostring(LocalPlayer.UserId),
-        senderUsername=LocalPlayer.Name,
-        senderDisplayName=LocalPlayer.DisplayName,
-        recipientId=tostring(activeDMUser.Id),
-        recipientUsername=activeDMUser.Username,
-        recipientDisplayName=activeDMUser.DisplayName,
-        type=isSticker and "sticker" or "text",
-        message=isSticker and "Sticker" or textValue,
-        sticker=isSticker and stickerUrl or nil,
-        _stickerAsset=isSticker and stickerAsset or nil,
-        timestamp=now,
+    local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
+    local a, b = tostring(LocalPlayer.UserId), tostring(activeDMUser.Id)
+    if tonumber(a) and tonumber(b) and tonumber(a) > tonumber(b) then a, b = b, a end
+
+    -- Make/update the thread metadata first. This is deliberately independent
+    -- of the server-chat Firebase database.
+    local meta = {
+        memberA = a,
+        memberB = b,
+        createdBy = tostring(LocalPlayer.UserId),
+        updatedAt = DateTime.now().UnixTimestampMillis,
     }
+    local metaOK, _, metaRaw = requestJSON(
+        "PUT",
+        dmAuthURL("/dmThreads/" .. urlEncode(thread) .. "/meta", DMAuth.idToken),
+        meta
+    )
+    if not metaOK then
+        if dmRefreshAuthToken() then
+            metaOK, _, metaRaw = requestJSON(
+                "PUT",
+                dmAuthURL("/dmThreads/" .. urlEncode(thread) .. "/meta", DMAuth.idToken),
+                meta
+            )
+        end
+    end
+    if not metaOK then
+        dmSignIn()
+        if DMAuth.idToken then
+            saveDMIdentity()
+            metaOK, _, metaRaw = requestJSON(
+                "PUT",
+                dmAuthURL("/dmThreads/" .. urlEncode(thread) .. "/meta", DMAuth.idToken),
+                meta
+            )
+        end
+    end
+    if not metaOK then
+        Input.PlaceholderText = "DM thread failed: " .. tostring(metaRaw or "Firebase error"):sub(1, 70)
+        task.delay(2, function()
+            if Composer.Parent and activeTab == "dm" and activeDMUser then
+                Input.PlaceholderText = "Message @" .. activeDMUser.Username .. "..."
+            end
+        end)
+        return false
+    end
+
+    local now = DateTime.now().UnixTimestampMillis
+    local message = {
+        senderId = tostring(LocalPlayer.UserId),
+        senderUsername = LocalPlayer.Name,
+        senderDisplayName = LocalPlayer.DisplayName,
+        recipientId = tostring(activeDMUser.Id),
+        recipientUsername = tostring(activeDMUser.Username or ""),
+        recipientDisplayName = tostring(activeDMUser.DisplayName or activeDMUser.Username or "Unknown"),
+        type = isSticker and "sticker" or "text",
+        message = isSticker and "Sticker" or textValue,
+        timestamp = now,
+    }
+    if isSticker then
+        message.sticker = stickerUrl
+    end
     if replyKey then
-        message.replyTo=replyKey
-        message.replyToText=tostring(replyPreviewText or "Message")
-        message.replyToDisplayName=tostring(replyDisplayName or "User")
+        message.replyTo = replyKey
+        message.replyToText = tostring(replyPreviewText or (isSticker and "Sticker" or "Message"))
+        message.replyToDisplayName = tostring(replyDisplayName or "User")
     end
 
-    local optimisticKey="local_dm_"..tostring(now).."_"..tostring(math.random(100000,999999))
-    message.key=optimisticKey
-    message._optimistic=true
-    dmSeen[optimisticKey]=true
-    renderDMMessage(message)
-    Input.Text=""
+    -- PUT gives the message a deterministic client-generated key. This avoids
+    -- depending on Firebase POST response parsing and makes retries idempotent.
+    local messageId = tostring(now) .. "_" .. tostring(math.random(100000, 999999))
+    local payload = {}
+    for key, value in pairs(message) do
+        if value ~= nil then payload[key] = value end
+    end
+
+    local messageURL = dmAuthURL(
+        "/dmThreads/" .. urlEncode(thread) .. "/messages/" .. urlEncode(messageId),
+        DMAuth.idToken
+    )
+    local ok, _, raw = requestJSON("PUT", messageURL, payload)
+    if not ok and dmRefreshAuthToken() then
+        ok, _, raw = requestJSON("PUT", dmAuthURL(
+            "/dmThreads/" .. urlEncode(thread) .. "/messages/" .. urlEncode(messageId),
+            DMAuth.idToken
+        ), payload)
+    end
+    if not ok then
+        dmSignIn()
+        if DMAuth.idToken then
+            saveDMIdentity()
+            ok, _, raw = requestJSON("PUT", dmAuthURL(
+                "/dmThreads/" .. urlEncode(thread) .. "/messages/" .. urlEncode(messageId),
+                DMAuth.idToken
+            ), payload)
+        end
+    end
+
+    if not ok then
+        Input.PlaceholderText = "DM send failed: " .. tostring(raw or "Firebase error"):sub(1, 70)
+        task.delay(2, function()
+            if Composer.Parent and activeTab == "dm" and activeDMUser then
+                Input.PlaceholderText = "Message @" .. activeDMUser.Username .. "..."
+            end
+        end)
+        return false
+    end
+
+    dmLastSentAt = os.clock()
+    rememberDMUser(activeDMUser)
+    Input.Text = ""
     clearReply()
-    StickerPanel.Visible=false
+    StickerPanel.Visible = false
 
-    local payload={
-        senderId=message.senderId,senderUsername=message.senderUsername,senderDisplayName=message.senderDisplayName,
-        recipientId=message.recipientId,recipientUsername=message.recipientUsername,recipientDisplayName=message.recipientDisplayName,
-        type=message.type,sticker=message.sticker,message=message.message,timestamp=message.timestamp,
-    }
-    if message.replyTo then
-        payload.replyTo=message.replyTo
-        payload.replyToText=message.replyToText
-        payload.replyToDisplayName=message.replyToDisplayName
+    -- Render only after Firebase accepted the write. This guarantees the card
+    -- represents a real DM message instead of a local-only fake send.
+    dmSeen = {}
+    for _, child in ipairs(DMConversation:GetChildren()) do
+        if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+            child:Destroy()
+        end
     end
-
-    task.spawn(function()
-        local ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
-        if not ok then
-            if dmRefreshAuthToken() then
-                ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
-            else
-                dmSignIn()
-                saveDMIdentity()
-                if ensureDMThread() then
-                    ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
-                end
-            end
-        end
-        if ok then
-            rememberDMUser(activeDMUser)
-            local realKey=type(result)=="table" and result.name or nil
-            local cardKey=optimisticKey
-            dmSeen[optimisticKey]=nil
-            if realKey then dmSeen[realKey]=true end
-            -- Rebuild the conversation so the optimistic item gets its real Firebase key.
-            dmSeen={}
-            for _,child in ipairs(DMConversation:GetChildren()) do
-                if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
-            end
-            loadDMMessages()
-        else
-            dmSeen[optimisticKey]=nil
-            for _,child in ipairs(DMConversation:GetChildren()) do
-                if child:GetAttribute("DMOptimisticKey")==optimisticKey then child:Destroy() end
-            end
-            lastSentAt=-math.huge
-            Input.PlaceholderText="DM send failed: "..tostring(result or "Firebase error"):sub(1,70)
-            task.delay(2,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
-        end
-    end)
+    loadDMMessages()
     return true
 end
 
@@ -2997,7 +3046,13 @@ local function sendMessage()
         end
     end)
 end
-Send.MouseButton1Click:Connect(sendMessage)
+Send.Activated:Connect(function()
+    if activeTab == "dm" then
+        sendDM()
+    else
+        sendMessage()
+    end
+end)
 Input.FocusLost:Connect(function(enterPressed)
     if enterPressed then sendMessage() end
 end)
