@@ -347,28 +347,6 @@ local Header = new("Frame", {
     Active = true,
 }, Main)
 
-local Title = new("TextLabel", {
-    BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(23, 10),
-    Size = UDim2.new(1, -80, 0, 17),
-    Font = Enum.Font.GothamBold,
-    Text = "S A I K I   R E C H A T",
-    TextColor3 = Color3.fromRGB(38, 157, 235),
-    TextSize = 13,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, Header)
-
-local Subtitle = new("TextLabel", {
-    BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(24, 27),
-    Size = UDim2.new(1, -80, 0, 12),
-    Font = Enum.Font.Gotham,
-    Text = "SERVER CHAT",
-    TextColor3 = Color3.fromRGB(75, 75, 80),
-    TextSize = 8,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, Header)
-
 -- Anchor / Unanchor button, matching the Saiki Emotes behavior.
 local anchored = false
 
@@ -826,6 +804,24 @@ local function cacheRemoteSticker(url)
     if okAsset and asset then return asset end
     return nil
 end
+
+-- Saiki C logo from the ScriptBlox repository. It is downloaded once and
+-- converted to a local asset because Roblox ImageLabels cannot use a raw
+-- GitHub URL directly. ScaleType.Fit preserves the source image's aspect ratio.
+local SAikiLogoUrl = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/SaikiCLogo.jpg"
+local SaikiLogoAsset = cacheRemoteSticker(SAikiLogoUrl)
+
+local Logo = new("ImageLabel", {
+    Name = "SaikiLogo",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    Size = UDim2.fromOffset(158, 42),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Image = SaikiLogoAsset or "",
+    ScaleType = Enum.ScaleType.Fit,
+    ZIndex = 3,
+}, Header)
 
 local function clearStickerGrid()
     for _, c in ipairs(StickerScroll:GetChildren()) do
