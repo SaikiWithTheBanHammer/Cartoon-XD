@@ -1356,6 +1356,7 @@ local function loadDMHistory()
                         DisplayName = tostring(entry.DisplayName or entry.Username or "Unknown"),
                         LastAt = tonumber(entry.LastAt) or 0,
                         HasMessage = true,
+                        HasIncoming = entry.HasIncoming == true,
                     })
                 end
             end
@@ -1369,14 +1370,26 @@ local function saveDMHistory()
     pcall(writefile, DM_HISTORY_PATH, HttpService:JSONEncode(dmHistory))
 end
 
-local function rememberDMUser(user)
+local function rememberDMUser(user, incoming, lastAt)
     if not user or tonumber(user.Id) == tonumber(LocalPlayer.UserId) then return end
     local id = tonumber(user.Id)
+    local existing = nil
+    for _, entry in ipairs(dmHistory) do
+        if tonumber(entry.Id) == id then
+            existing = entry
+            break
+        end
+    end
+
     local updated = {
-        Id = id, Username = tostring(user.Username or ""), DisplayName = tostring(user.DisplayName or user.Username or "Unknown"),
-        LastAt = DateTime.now().UnixTimestampMillis,
+        Id = id,
+        Username = tostring(user.Username or (existing and existing.Username) or ""),
+        DisplayName = tostring(user.DisplayName or (existing and existing.DisplayName) or user.Username or "Unknown"),
+        LastAt = tonumber(lastAt) or DateTime.now().UnixTimestampMillis,
         HasMessage = true,
+        HasIncoming = (incoming == true) or (existing and existing.HasIncoming == true) or false,
     }
+
     local out = {updated}
     for _, entry in ipairs(dmHistory) do
         if tonumber(entry.Id) ~= id then table.insert(out, entry) end
@@ -1384,6 +1397,58 @@ local function rememberDMUser(user)
     end
     dmHistory = out
     saveDMHistory()
+end
+
+-- Scan the DM database for messages that were sent TO this player. This is
+-- intentionally independent of which DM conversations the player has opened.
+-- The local history then survives later database cleanup.
+local function syncDMIncomingHistory()
+    if not DMAuth.idToken then return end
+    local ok, data = requestJSON("GET", dmAuthURL("/dmThreads", DMAuth.idToken))
+    if not ok or type(data) ~= "table" then return end
+
+    local myId = tostring(LocalPlayer.UserId)
+    local found = {}
+    for _, thread in pairs(data) do
+        if type(thread) == "table" and type(thread.messages) == "table" then
+            for _, msg in pairs(thread.messages) do
+                if type(msg) == "table"
+                    and tostring(msg.recipientId or "") == myId
+                    and tostring(msg.senderId or "") ~= myId then
+                    local senderId = tonumber(msg.senderId)
+                    if senderId then
+                        local old = found[senderId]
+                        local stamp = tonumber(msg.timestamp) or 0
+                        if not old or stamp >= old.LastAt then
+                            found[senderId] = {
+                                Id = senderId,
+                                Username = tostring(msg.senderUsername or ""),
+                                DisplayName = tostring(msg.senderDisplayName or msg.senderUsername or "Unknown"),
+                                LastAt = stamp,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local changed = false
+    for _, sender in pairs(found) do
+        rememberDMUser(sender, true, sender.LastAt)
+        changed = true
+    end
+
+    if changed then
+        table.sort(dmHistory, function(a, b)
+            return (tonumber(a.LastAt) or 0) > (tonumber(b.LastAt) or 0)
+        end)
+        while #dmHistory > 40 do table.remove(dmHistory) end
+        saveDMHistory()
+        if activeTab == "dm" and not activeDMUser then
+            renderDMResults()
+        end
+    end
 end
 
 local function saveDMIdentity()
@@ -1394,6 +1459,7 @@ local function saveDMIdentity()
 end
 saveDMIdentity()
 loadDMHistory()
+task.spawn(syncDMIncomingHistory)
 
 local function addDMCandidate(map, userId, username, displayName, source)
     userId = tonumber(userId)
@@ -1436,6 +1502,19 @@ local function makeDMRow(parent, candidate, compact)
         Font = Enum.Font.Gotham, Text = "@"..candidate.Username, TextColor3 = Color3.fromRGB(92,92,98), TextSize = 7,
         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
+
+    if candidate.HasIncoming == true then
+        local incomingDot = new("Frame", {
+            Name = "IncomingDMIndicator",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -7, 0.5, 0),
+            Size = UDim2.fromOffset(8, 8),
+            BackgroundColor3 = Color3.fromRGB(55, 205, 105),
+            BorderSizePixel = 0,
+        }, row)
+        addCorner(incomingDot, 999)
+    end
+
     row.MouseButton1Click:Connect(function()
         activeDMUser = candidate
         DMSearch.Visible=false; DMHome.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
@@ -1494,7 +1573,12 @@ local function renderDMResults()
     end
 
     for _, entry in ipairs(dmHistory) do
-        makeDMRow(DMHistoryList, {Id=entry.Id, Username=entry.Username, DisplayName=entry.DisplayName}, true)
+        makeDMRow(DMHistoryList, {
+            Id=entry.Id,
+            Username=entry.Username,
+            DisplayName=entry.DisplayName,
+            HasIncoming=entry.HasIncoming == true,
+        }, true)
     end
     if #dmHistory == 0 then
         new("TextLabel", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,30), Font=Enum.Font.Gotham, Text="No DMs yet", TextColor3=Color3.fromRGB(78,78,83), TextSize=8, TextXAlignment=Enum.TextXAlignment.Center}, DMHistoryList)
@@ -1701,7 +1785,17 @@ loadDMMessages = function()
     -- Opening an empty conversation must never create a History entry.
     -- Once at least one real message/sticker exists, persist this person locally.
     if #list > 0 then
-        rememberDMUser(activeDMUser)
+        local hasIncoming = false
+        local latestAt = 0
+        for _, msg in ipairs(list) do
+            local stamp = tonumber(msg.timestamp) or 0
+            if stamp > latestAt then latestAt = stamp end
+            if tostring(msg.recipientId or "") == tostring(LocalPlayer.UserId)
+                and tostring(msg.senderId or "") ~= tostring(LocalPlayer.UserId) then
+                hasIncoming = true
+            end
+        end
+        rememberDMUser(activeDMUser, hasIncoming, latestAt)
     end
 
     for _,msg in ipairs(list) do renderDMMessage(msg) end
@@ -3075,13 +3169,16 @@ task.spawn(function()
             refreshAuthToken()
         end
 
-        if Auth.idToken then
-            if activeTab == "server" then
-                getNewMessages()
-            elseif activeTab == "dm" and activeDMUser then
-                if not DMAuth.idToken then dmRefreshAuthToken() end
+        if activeTab == "dm" then
+            if not DMAuth.idToken then dmRefreshAuthToken() end
+            if DMAuth.idToken then
+                syncDMIncomingHistory()
+            end
+            if activeDMUser and DMAuth.idToken then
                 loadDMMessages()
             end
+        elseif Auth.idToken then
+            getNewMessages()
 
             -- One small reaction-tree request every ~4.5 seconds instead of
             -- one request per message. Message cards themselves are never rebuilt.
