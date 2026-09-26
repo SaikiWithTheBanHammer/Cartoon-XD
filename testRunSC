@@ -1399,16 +1399,19 @@ local function rememberDMUser(user)
 end
 
 local function saveDMIdentity()
+    if not DMAuth.idToken or not DMAuth.uid then return false end
     local data = {
-        authUid = DMAuth.uid,
+        authUid = tostring(DMAuth.uid),
         robloxUserId = tostring(LocalPlayer.UserId),
         username = LocalPlayer.Name,
         displayName = LocalPlayer.DisplayName,
         updatedAt = DateTime.now().UnixTimestampMillis,
     }
-    if DMAuth.idToken then
-        requestJSON("PUT", dmAuthURL("/userLinks/" .. urlEncode(LocalPlayer.UserId), DMAuth.idToken), data)
+    local ok = requestJSON("PUT", dmAuthURL("/userLinks/" .. urlEncode(LocalPlayer.UserId), DMAuth.idToken), data)
+    if not ok and dmRefreshAuthToken() then
+        ok = requestJSON("PUT", dmAuthURL("/userLinks/" .. urlEncode(LocalPlayer.UserId), DMAuth.idToken), data)
     end
+    return ok
 end
 saveDMIdentity()
 loadDMHistory()
@@ -1460,6 +1463,7 @@ local function makeDMRow(parent, candidate, compact)
         DMSearch.Visible=false; DMHome.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
         DMTarget.Text=candidate.DisplayName; DMTargetUser.Text="@"..candidate.Username
         Composer.Visible=true
+        StickerOpen.Visible=true
         dmSeen={}
         for _, child in ipairs(DMConversation:GetChildren()) do
             if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
@@ -1502,7 +1506,9 @@ local function renderDMResults()
     DMHome.Visible=true
     DMResults.Visible=false
     local serverList={}
-    for _, candidate in pairs(dmCandidates) do table.insert(serverList, candidate) end
+    for _, candidate in pairs(dmCandidates) do
+        if candidate.Source == "Server" then table.insert(serverList, candidate) end
+    end
     table.sort(serverList, function(a,b) return string.lower(a.DisplayName or "") < string.lower(b.DisplayName or "") end)
     for _, candidate in ipairs(serverList) do makeDMRow(DMServerList, candidate, true) end
     if #serverList == 0 then
@@ -1717,7 +1723,12 @@ end
 
 local function ensureDMThread()
     if not activeDMUser then return false end
-    if not DMAuth.idToken and not dmRefreshAuthToken() then return false end
+    if not DMAuth.idToken then
+        if not dmSignIn() then return false end
+    end
+    if not saveDMIdentity() then
+        if not dmRefreshAuthToken() or not saveDMIdentity() then return false end
+    end
     local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
     local a,b=tostring(LocalPlayer.UserId),tostring(activeDMUser.Id)
     if tonumber(a) and tonumber(b) and tonumber(a)>tonumber(b) then a,b=b,a end
@@ -1751,12 +1762,12 @@ sendDM = function(stickerUrl, stickerAsset)
 
     local thread=dmThreadId(LocalPlayer.UserId,activeDMUser.Id)
     if not ensureDMThread() then
-        if dmSignIn() then
-            saveDMIdentity()
-        end
+        dmSignIn()
+        saveDMIdentity()
         if not ensureDMThread() then
-            Input.PlaceholderText="DM setup failed - Firebase"
-            task.delay(1.5,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+            Input.PlaceholderText="DM setup failed - check Firebase rules"
+            task.delay(2,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+            lastSentAt=-math.huge
             return false
         end
     end
@@ -1832,8 +1843,8 @@ sendDM = function(stickerUrl, stickerAsset)
                 if child:GetAttribute("DMOptimisticKey")==optimisticKey then child:Destroy() end
             end
             lastSentAt=-math.huge
-            Input.PlaceholderText="DM send failed"
-            task.delay(1,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+            Input.PlaceholderText="DM send failed: "..tostring(result or "Firebase error"):sub(1,70)
+            task.delay(2,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
         end
     end)
     return true
@@ -2246,6 +2257,87 @@ openMessagePopup = function(message, isDM)
             fetchReactionsForMessage(message.key)
         end)
     end
+end
+
+-- -----------------------------------------------------------------------------
+-- DM-specific message actions. DMs use their own popup so they never depend on
+-- the Server Chat reaction popup state.
+-- -----------------------------------------------------------------------------
+local DMActionShade = new("TextButton", {
+    Name="DMActionShade", Visible=false, AutoButtonColor=false, Text="",
+    BackgroundColor3=Color3.fromRGB(0,0,0), BackgroundTransparency=0.38,
+    Size=UDim2.fromScale(1,1), ZIndex=300,
+}, ScreenGui)
+local DMActionBox = new("Frame", {
+    BackgroundColor3=Color3.fromRGB(13,13,15), BorderSizePixel=0,
+    AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(0.5,0.5),
+    Size=UDim2.fromOffset(286,150), ZIndex=301,
+}, DMActionShade)
+addCorner(DMActionBox,14)
+addStroke(DMActionBox,Color3.fromRGB(39,39,43),0.05,1)
+new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(15,10),
+    Size=UDim2.new(1,-30,0,15), Font=Enum.Font.GothamBold,
+    Text="DM MESSAGE", TextColor3=Color3.fromRGB(45,161,235), TextSize=9,
+    TextXAlignment=Enum.TextXAlignment.Left, ZIndex=302,
+}, DMActionBox)
+local DMActionPreview = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(15,29),
+    Size=UDim2.new(1,-30,0,34), Font=Enum.Font.Gotham,
+    Text="", TextColor3=Color3.fromRGB(165,165,170), TextSize=10,
+    TextWrapped=true, TextXAlignment=Enum.TextXAlignment.Left,
+    TextYAlignment=Enum.TextYAlignment.Top, TextTruncate=Enum.TextTruncate.AtEnd,
+    ZIndex=302,
+}, DMActionBox)
+local DMActionButtons = new("Frame", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(12,76),
+    Size=UDim2.new(1,-24,0,42), ZIndex=302,
+}, DMActionBox)
+new("UIListLayout", {FillDirection=Enum.FillDirection.Horizontal,HorizontalAlignment=Enum.HorizontalAlignment.Center,Padding=UDim.new(0,7)}, DMActionButtons)
+local function dmActionButton(label)
+    local b=new("TextButton", {
+        BackgroundColor3=Color3.fromRGB(23,23,26), BorderSizePixel=0,
+        Size=UDim2.fromOffset(82,36), Font=Enum.Font.GothamBold,
+        Text=label, TextColor3=Color3.fromRGB(220,220,225), TextSize=9,
+        AutoButtonColor=false, ZIndex=303,
+    },DMActionButtons)
+    addCorner(b,9)
+    return b
+end
+local DMReplyButton=dmActionButton("REPLY")
+local DMCopyButton=dmActionButton("COPY")
+local DMCloseButton=dmActionButton("CLOSE")
+local activeDMActionMessage=nil
+local function closeDMActionPopup()
+    activeDMActionMessage=nil
+    DMActionShade.Visible=false
+end
+DMCloseButton.MouseButton1Click:Connect(closeDMActionPopup)
+DMActionShade.MouseButton1Click:Connect(function() closeDMActionPopup() end)
+DMActionBox.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+        -- Keep clicks inside the box from closing it through the shade.
+    end
+end)
+DMReplyButton.MouseButton1Click:Connect(function()
+    local m=activeDMActionMessage
+    if m then setReply(m) end
+    closeDMActionPopup()
+end)
+DMCopyButton.MouseButton1Click:Connect(function()
+    local m=activeDMActionMessage
+    if m then copyText(m.type=="sticker" and "Sticker" or (m.message or "")) end
+    closeDMActionPopup()
+end)
+local oldOpenMessagePopup=openMessagePopup
+openMessagePopup=function(message,isDM)
+    if isDM then
+        activeDMActionMessage=message
+        DMActionPreview.Text=tostring(message.type=="sticker" and "Sticker" or (message.message or ""))
+        DMActionShade.Visible=true
+        return
+    end
+    return oldOpenMessagePopup(message,false)
 end
 
 -- -----------------------------------------------------------------------------
