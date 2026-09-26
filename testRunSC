@@ -1671,8 +1671,11 @@ renderMessage = function(message)
     }, holder)
     addCorner(avatar, math.floor(avatarSize / 2))
 
+    -- Ultron join messages use the exact same incoming-message bubble
+    -- geometry and color as every other message received from another user.
+    -- Only the sender identity/avatar remains Ultron.
     local bubble = new("Frame", {
-        BackgroundColor3 = isUltron and Color3.fromRGB(185, 32, 38) or (mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22)),
+        BackgroundColor3 = mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22),
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(
             mine and groupLeft or groupLeft + avatarSize + groupGap,
@@ -1681,9 +1684,10 @@ renderMessage = function(message)
         Size = UDim2.fromOffset(bubbleWidth, bubbleHeight),
     }, holder)
 
-    -- Small one-line messages get the stadium/pill look.
-    -- Taller messages use a normal rounded rectangle so the corners don't
-    -- become excessively circular and eat into the usable message area.
+    -- All received messages, including Saiki's Ultron announcements,
+    -- use the same content-sized bubble geometry:
+    -- short messages are pills and taller messages use the same rounded
+    -- rectangle radius as other incoming messages.
     local bubbleRadius = bubbleHeight <= 34 and math.floor(bubbleHeight / 2) or 12
     addCorner(bubble, bubbleRadius)
 
@@ -2148,4 +2152,4 @@ getgenv().SaikiRechat = {
     Show = function() Main.Visible = true end,
 }
 
-print("[Saiki Rechat v15] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v16] Loaded | Server: " .. tostring(game.JobId))
