@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v12
+    SAIKI RECHAT v14
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -330,16 +330,47 @@ local Subtitle = new("TextLabel", {
     TextXAlignment = Enum.TextXAlignment.Left,
 }, Header)
 
-local Close = new("TextButton", {
-    BackgroundTransparency = 1,
-    Position = UDim2.new(1, -42, 0, 9),
-    Size = UDim2.fromOffset(25, 25),
-    Font = Enum.Font.GothamMedium,
-    Text = "X",
-    TextColor3 = Color3.fromRGB(105, 105, 110),
-    TextSize = 12,
-    AutoButtonColor = false,
+-- Anchor / Unanchor button, matching the Saiki Emotes behavior.
+local anchored = false
+
+local AnchorCircle = new("Frame", {
+    Name = "AnchorCircle",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(1, -28, 0, 23),
+    Size = UDim2.fromOffset(32, 32),
+    BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+    BackgroundTransparency = 0.08,
+    BorderSizePixel = 0,
+    ZIndex = 11,
+    Active = false,
 }, Header)
+addCorner(AnchorCircle, 999)
+addStroke(AnchorCircle, Color3.fromRGB(70, 70, 78), 0.55, 1)
+
+local AnchorButton = new("ImageButton", {
+    Name = "AnchorButton",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(1, -28, 0, 23),
+    Size = UDim2.fromOffset(22, 22),
+    Image = "rbxthumb://type=Asset&id=127885604527086&w=150&h=150",
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    AutoButtonColor = false,
+    ScaleType = Enum.ScaleType.Fit,
+    ZIndex = 12,
+    Active = true,
+}, Header)
+
+local function setAnchorState(value)
+    anchored = value
+    AnchorButton.Image = anchored
+        and "rbxthumb://type=Asset&id=116904016585445&w=150&h=150"
+        or "rbxthumb://type=Asset&id=127885604527086&w=150&h=150"
+end
+
+AnchorButton.Activated:Connect(function()
+    setAnchorState(not anchored)
+end)
 
 -- Message viewport.
 local Scroll = new("ScrollingFrame", {
@@ -1016,7 +1047,12 @@ local function makeDraggable(handle, target)
     local startPos
 
     handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if anchored then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = target.Position
@@ -1024,8 +1060,14 @@ local function makeDraggable(handle, target)
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
-        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        if not dragging or anchored then
+            return
+        end
+
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement
+            and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
 
         local delta = input.Position - dragStart
         target.Position = UDim2.new(
@@ -1037,7 +1079,8 @@ local function makeDraggable(handle, target)
     end)
 
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
@@ -1050,9 +1093,6 @@ Toggle.MouseButton1Click:Connect(function()
     Main.Visible = not Main.Visible
 end)
 
-Close.MouseButton1Click:Connect(function()
-    Main.Visible = false
-end)
 
 -- -----------------------------------------------------------------------------
 -- Message state
@@ -2001,6 +2041,8 @@ task.spawn(function()
     end
 end)
 
+-- Top-right anchor state is intentionally session-only, matching Saiki Emotes.
+-- Anchored = true prevents the main window from being dragged.
 getgenv().SaikiRechat = {
     GUI = ScreenGui,
     UID = function() return Auth.uid end,
@@ -2011,4 +2053,4 @@ getgenv().SaikiRechat = {
     Show = function() Main.Visible = true end,
 }
 
-print("[Saiki Rechat v12] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v14] Loaded | Server: " .. tostring(game.JobId))
