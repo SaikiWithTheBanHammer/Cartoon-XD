@@ -1596,11 +1596,12 @@ renderMessage = function(message)
         )
         bodyWidth = math.clamp(unwrapped.X, minBodyWidth, maxBodyWidth)
         local wrapped = TextService:GetTextSize(
-
             bodyText, textSize, font, Vector2.new(bodyWidth, 10000)
         )
         local lineHeight = 13
-        bodyHeight = math.max(lineHeight, math.ceil(wrapped.Y) + 4)
+        -- Give the TextLabel extra vertical room. Roblox can round the measured
+        -- wrapped height down, which can clip the final word/line of a message.
+        bodyHeight = math.max(lineHeight, math.ceil(wrapped.Y) + 12)
     end
 
     -- Reply target. Prefer the rendered target; if it has already scrolled
@@ -1775,7 +1776,7 @@ renderMessage = function(message)
             BackgroundTransparency = 1, Position = UDim2.fromOffset(10, contentY),
             Size = UDim2.new(1, -20, 0, bodyHeight), Font = font, Text = bodyText,
             TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(232, 232, 235), TextSize = textSize, TextWrapped = true, TextTruncate = Enum.TextTruncate.None,
-            TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
+            TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Top,
         }, bubble)
     end
 
