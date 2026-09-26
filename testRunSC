@@ -1037,6 +1037,14 @@ end
 local function sendSticker(sticker)
     if not sticker then return end
     local publicUrl = sticker.url or stickerPublicUrl(activeStickerCategory, sticker)
+    if activeTab == "dm" and activeDMUser then
+        if not publicUrl or publicUrl == "" then
+            StickerStatus.Text = "Sticker URL unavailable"
+            return
+        end
+        sendDM(publicUrl, sticker.asset)
+        return
+    end
     if not publicUrl or publicUrl == "" then
         StickerStatus.Text = "Sticker URL unavailable"
         return
@@ -1539,16 +1547,146 @@ local loadDMMessages
 local function renderDMMessage(msg)
     if not msg or not msg.key or dmSeen[msg.key] then return end
     dmSeen[msg.key] = true
+
     local mine = tonumber(msg.senderId) == tonumber(LocalPlayer.UserId)
-    local textValue = tostring(msg.message or "")
-    local width = math.clamp(TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(10000,1000)).X + 20, 66, 225)
-    local wrap = TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(width - 20,10000))
-    local height = math.max(28, math.ceil(wrap.Y) + 18)
-    local holder = new("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,height+3)}, DMConversation)
-    local bubble = new("Frame", {BackgroundColor3=mine and Color3.fromRGB(31,31,34) or Color3.fromRGB(20,20,22), BorderSizePixel=0, Position=UDim2.new(mine and 1 or 0, mine and -width-3 or 3, 0, 0), Size=UDim2.fromOffset(width,height)}, holder)
-    addCorner(bubble, height <= 34 and math.floor(height/2) or 12)
-    new("TextLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(10, mine and 5 or 3), Size=UDim2.new(1,-20,1,-8), Font=Enum.Font.GothamBold, Text=textValue, TextColor3=Color3.fromRGB(232,232,235), TextSize=11, TextWrapped=true, TextYAlignment=Enum.TextYAlignment.Top, TextXAlignment=Enum.TextXAlignment.Center, TextTruncate=Enum.TextTruncate.None}, bubble)
-    task.defer(function() if DMConversation.Parent then DMConversation.CanvasPosition=Vector2.new(0,math.max(0,DMConversation.AbsoluteCanvasSize.Y)) end end)
+    local isSticker = tostring(msg.type or "text") == "sticker"
+    local textValue = tostring(msg.message or (isSticker and "Sticker") or "")
+    local bodyWidth = isSticker and 118 or math.clamp(
+        TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(10000, 1000)).X,
+        46, 205
+    )
+    local bodyHeight
+    if isSticker then
+        bodyHeight = 118
+    else
+        local wrap = TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(bodyWidth, 10000))
+        bodyHeight = math.max(13, math.ceil(wrap.Y) + 12)
+    end
+
+    local replyText = msg.replyToText or msg.replyText
+    local replyName = msg.replyToDisplayName or msg.replyDisplayName
+    local replyHeight = msg.replyTo and 30 or 0
+    local top = msg.replyTo and 35 or 4
+    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 20, 66, 225)
+    local bubbleHeight = math.max(28, math.ceil(top + bodyHeight + 5))
+
+    local holder = new("Frame", {
+        BackgroundTransparency=1,
+        Size=UDim2.new(1,0,0,bubbleHeight+5),
+    }, DMConversation)
+    if msg._optimistic then holder:SetAttribute("DMOptimisticKey", msg.key) end
+
+    local bubble = new("Frame", {
+        BackgroundColor3=mine and Color3.fromRGB(31,31,34) or Color3.fromRGB(20,20,22),
+        BorderSizePixel=0,
+        Position=UDim2.new(mine and 1 or 0, mine and -bubbleWidth-3 or 3, 0, 0),
+        Size=UDim2.fromOffset(bubbleWidth,bubbleHeight),
+    }, holder)
+    addCorner(bubble, bubbleHeight <= 34 and math.floor(bubbleHeight/2) or 12)
+
+    if msg.replyTo then
+        local replyBar = new("Frame", {
+            BackgroundColor3=Color3.fromRGB(45,160,232),
+            BorderSizePixel=0,
+            Position=UDim2.fromOffset(7,6),
+            Size=UDim2.new(1,-14,0,24),
+        }, bubble)
+        addCorner(replyBar, 6)
+        new("TextLabel", {
+            BackgroundTransparency=1,
+            Position=UDim2.fromOffset(7,2),
+            Size=UDim2.new(1,-14,0,9),
+            Font=Enum.Font.GothamBold,
+            Text=tostring(replyName or "Reply"),
+            TextColor3=Color3.fromRGB(235,235,240),
+            TextSize=7,
+            TextXAlignment=Enum.TextXAlignment.Left,
+            TextTruncate=Enum.TextTruncate.AtEnd,
+        }, replyBar)
+        new("TextLabel", {
+            BackgroundTransparency=1,
+            Position=UDim2.fromOffset(7,11),
+            Size=UDim2.new(1,-14,0,10),
+            Font=Enum.Font.Gotham,
+            Text=tostring(replyText or (isSticker and "Sticker" or "Message")),
+            TextColor3=Color3.fromRGB(205,205,210),
+            TextSize=7,
+            TextXAlignment=Enum.TextXAlignment.Left,
+            TextTruncate=Enum.TextTruncate.AtEnd,
+        }, replyBar)
+    end
+
+    if isSticker then
+        local asset = msg._stickerAsset or cacheRemoteSticker(tostring(msg.sticker or ""))
+        if asset then
+            new("ImageLabel", {
+                BackgroundTransparency=1,
+                Position=UDim2.fromOffset((bubbleWidth-118)/2, top),
+                Size=UDim2.fromOffset(118,118),
+                Image=asset,
+                ScaleType=Enum.ScaleType.Fit,
+            }, bubble)
+        else
+            new("TextLabel", {
+                BackgroundTransparency=1,
+                Position=UDim2.fromOffset(10,top),
+                Size=UDim2.new(1,-20,0,24),
+                Font=Enum.Font.GothamBold,
+                Text="Sticker",
+                TextColor3=Color3.fromRGB(232,232,235),
+                TextSize=11,
+                TextXAlignment=Enum.TextXAlignment.Center,
+            }, bubble)
+        end
+    else
+        new("TextLabel", {
+            BackgroundTransparency=1,
+            Position=UDim2.fromOffset(10, top + (mine and 3 or 0)),
+            Size=UDim2.new(1,-20,0,bodyHeight),
+            Font=Enum.Font.GothamBold,
+            Text=textValue,
+            TextColor3=Color3.fromRGB(232,232,235),
+            TextSize=11,
+            TextWrapped=true,
+            TextYAlignment=Enum.TextYAlignment.Top,
+            TextXAlignment=Enum.TextXAlignment.Center,
+            TextTruncate=Enum.TextTruncate.None,
+        }, bubble)
+    end
+
+    local hitbox = new("TextButton", {
+        BackgroundTransparency=1,
+        Size=UDim2.fromScale(1,1),
+        Text="",
+        AutoButtonColor=false,
+        ZIndex=5,
+    }, bubble)
+
+    local pressStart = 0
+    local holdTriggered = false
+    local activeInput = nil
+    hitbox.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        activeInput=input
+        pressStart=os.clock()
+        holdTriggered=false
+        task.delay(0.42,function()
+            if activeInput==input and not holdTriggered and os.clock()-pressStart>=0.40 then
+                holdTriggered=true
+                openMessagePopup(msg, true)
+            end
+        end)
+    end)
+    hitbox.InputEnded:Connect(function(input)
+        if input==activeInput then activeInput=nil end
+    end)
+
+    task.defer(function()
+        if DMConversation.Parent then
+            DMConversation.CanvasPosition=Vector2.new(0,math.max(0,DMConversation.AbsoluteCanvasSize.Y))
+        end
+    end)
 end
 
 loadDMMessages = function()
@@ -1560,52 +1698,129 @@ loadDMMessages = function()
         ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
     end
     if not ok then return end
-    for key, msg in pairs(data or {}) do
-        if type(msg)=="table" then msg.key=key; renderDMMessage(msg) end
+    local list={}
+    for key,msg in pairs(data or {}) do
+        if type(msg)=="table" then msg.key=key; table.insert(list,msg) end
     end
+    table.sort(list,function(a,b) return tostring(a.key)<tostring(b.key) end)
+    for _,msg in ipairs(list) do renderDMMessage(msg) end
 end
 
 local function ensureDMThread()
-    if not activeDMUser or not DMAuth.idToken then return false end
-    local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
-    local a, b = tostring(LocalPlayer.UserId), tostring(activeDMUser.Id)
-    if tonumber(a) and tonumber(b) and tonumber(a) > tonumber(b) then a, b = b, a end
-    local meta = {
-        memberA = a,
-        memberB = b,
-        createdBy = tostring(LocalPlayer.UserId),
-        updatedAt = DateTime.now().UnixTimestampMillis,
-    }
-    return requestJSON("PUT", dmAuthURL("/dmThreads/"..urlEncode(thread).."/meta", DMAuth.idToken), meta)
-end
-
-local function sendDM()
     if not activeDMUser then return false end
-    local textValue = tostring(Input.Text or "")
-    if textValue:gsub("%s+", "") == "" then return false end
+    if not DMAuth.idToken and not dmRefreshAuthToken() then return false end
     local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
-    if not ensureDMThread() then
-        Input.PlaceholderText="DM setup failed"
-        task.delay(1,function() if Composer.Parent and activeTab=="dm" then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
-        return false
-    end
-    local payload={senderId=tostring(LocalPlayer.UserId),senderUsername=LocalPlayer.Name,senderDisplayName=LocalPlayer.DisplayName,recipientId=tostring(activeDMUser.Id),recipientUsername=activeDMUser.Username,recipientDisplayName=activeDMUser.DisplayName,message=textValue,timestamp=DateTime.now().UnixTimestampMillis}
-    local ok = requestJSON("POST", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken), payload)
-    if ok then
-        rememberDMUser(activeDMUser)
-        Input.Text=""
-        loadDMMessages()
-    else
-        Input.PlaceholderText="DM send failed"
-        task.delay(1,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+    local a,b=tostring(LocalPlayer.UserId),tostring(activeDMUser.Id)
+    if tonumber(a) and tonumber(b) and tonumber(a)>tonumber(b) then a,b=b,a end
+    local meta={memberA=a,memberB=b,createdBy=tostring(LocalPlayer.UserId),updatedAt=DateTime.now().UnixTimestampMillis}
+    local ok=requestJSON("PUT",dmAuthURL("/dmThreads/"..urlEncode(thread).."/meta",DMAuth.idToken),meta)
+    if not ok and dmRefreshAuthToken() then
+        ok=requestJSON("PUT",dmAuthURL("/dmThreads/"..urlEncode(thread).."/meta",DMAuth.idToken),meta)
     end
     return ok
+end
+
+local function sendDM(stickerUrl, stickerAsset)
+    if not activeDMUser then return false end
+    if not DMAuth.idToken and not dmRefreshAuthToken() then
+        Input.PlaceholderText="DM authentication failed"
+        return false
+    end
+
+    local isSticker = type(stickerUrl)=="string" and stickerUrl~=""
+    local textValue = tostring(Input.Text or "")
+    if not isSticker and textValue:gsub("%s+","")=="" then return false end
+
+    local elapsed=os.clock()-lastSentAt
+    if elapsed<SLOW_MODE then
+        showSlowMode(SLOW_MODE-elapsed)
+        return false
+    end
+    lastSentAt=os.clock()
+
+    local thread=dmThreadId(LocalPlayer.UserId,activeDMUser.Id)
+    if not ensureDMThread() then
+        Input.PlaceholderText="DM setup failed"
+        task.delay(1,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+        return false
+    end
+
+    local now=DateTime.now().UnixTimestampMillis
+    local message={
+        senderId=tostring(LocalPlayer.UserId),
+        senderUsername=LocalPlayer.Name,
+        senderDisplayName=LocalPlayer.DisplayName,
+        recipientId=tostring(activeDMUser.Id),
+        recipientUsername=activeDMUser.Username,
+        recipientDisplayName=activeDMUser.DisplayName,
+        type=isSticker and "sticker" or "text",
+        message=isSticker and "Sticker" or textValue,
+        sticker=isSticker and stickerUrl or nil,
+        _stickerAsset=isSticker and stickerAsset or nil,
+        timestamp=now,
+    }
+    if replyKey then
+        message.replyTo=replyKey
+        message.replyToText=tostring(replyPreviewText or "Message")
+        message.replyToDisplayName=tostring(replyDisplayName or "User")
+    end
+
+    local optimisticKey="local_dm_"..tostring(now).."_"..tostring(math.random(100000,999999))
+    message.key=optimisticKey
+    message._optimistic=true
+    dmSeen[optimisticKey]=true
+    renderDMMessage(message)
+    Input.Text=""
+    clearReply()
+    StickerPanel.Visible=false
+
+    local payload={
+        senderId=message.senderId,senderUsername=message.senderUsername,senderDisplayName=message.senderDisplayName,
+        recipientId=message.recipientId,recipientUsername=message.recipientUsername,recipientDisplayName=message.recipientDisplayName,
+        type=message.type,sticker=message.sticker,message=message.message,timestamp=message.timestamp,
+    }
+    if message.replyTo then
+        payload.replyTo=message.replyTo
+        payload.replyToText=message.replyToText
+        payload.replyToDisplayName=message.replyToDisplayName
+    end
+
+    task.spawn(function()
+        local ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
+        if not ok and dmRefreshAuthToken() then
+            ok,result=requestJSON("POST",dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages",DMAuth.idToken),payload)
+        end
+        if ok then
+            rememberDMUser(activeDMUser)
+            local realKey=type(result)=="table" and result.name or nil
+            local cardKey=optimisticKey
+            dmSeen[optimisticKey]=nil
+            if realKey then dmSeen[realKey]=true end
+            -- Rebuild the conversation so the optimistic item gets its real Firebase key.
+            dmSeen={}
+            for _,child in ipairs(DMConversation:GetChildren()) do
+                if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
+            end
+            loadDMMessages()
+        else
+            dmSeen[optimisticKey]=nil
+            for _,child in ipairs(DMConversation:GetChildren()) do
+                if child:GetAttribute("DMOptimisticKey")==optimisticKey then child:Destroy() end
+            end
+            lastSentAt=-math.huge
+            Input.PlaceholderText="DM send failed"
+            task.delay(1,function() if Composer.Parent and activeTab=="dm" and activeDMUser then Input.PlaceholderText="Message @"..activeDMUser.Username.."..." end end)
+        end
+    end)
+    return true
 end
 
 local function closeDMConversation()
     activeDMUser=nil
     DMHeader.Visible=false; DMConversation.Visible=false; DMSearch.Visible=true; DMHome.Visible=true; DMResults.Visible=false
     Composer.Visible=false
+    StickerOpen.Visible=false
+    StickerPanel.Visible=false
     Input.PlaceholderText="Type message..."
     Input.Text=""
     renderDMResults()
@@ -1616,12 +1831,13 @@ local function switchTab(tab)
     local dm=tab=="dm"
     Scroll.Visible=not dm
     DMRoot.Visible=dm
-    StickerOpen.Visible=not dm
+    StickerOpen.Visible=(not dm) or activeDMUser ~= nil
     TabSwitch.Text=dm and "CHAT" or "DM"
     if dm then
         clearReply()
         Input.Text=""
         Composer.Visible=activeDMUser ~= nil
+        StickerOpen.Visible=activeDMUser ~= nil
         Input.PlaceholderText=activeDMUser and ("Message @"..activeDMUser.Username.."...") or "Type message..."
         if not activeDMUser then
             DMHeader.Visible=false
@@ -1652,6 +1868,8 @@ cards = {}
 cardByKey = {}
 layoutCounter = 0
 replyKey = nil
+replyDisplayName = nil
+replyPreviewText = nil
 lastSentAt = -math.huge
 local reactionState = {}
 local updateReactionBadges
@@ -1662,6 +1880,8 @@ end
 
 clearReply = function()
     replyKey = nil
+    replyDisplayName = nil
+    replyPreviewText = nil
     ReplyBar.Visible = false
     ReplyText.Text = ""
     if Composer and Composer.Parent then
@@ -1671,8 +1891,9 @@ end
 
 local function setReply(message)
     replyKey = message.key
-    local preview = tostring(message.message or (message.type == "sticker" and "Sticker") or "")
-    ReplyText.Text = tostring(message.displayName or message.username or "user") .. ": " .. preview
+    replyDisplayName = tostring(message.senderDisplayName or message.displayName or message.senderUsername or message.username or "user")
+    replyPreviewText = tostring(message.message or (message.type == "sticker" and "Sticker") or "")
+    ReplyText.Text = replyDisplayName .. ": " .. replyPreviewText
     ReplyBar.Visible = true
     tween(Composer, {BackgroundColor3 = Color3.fromRGB(16, 18, 21)}, 0.12)
     Input:CaptureFocus()
@@ -1797,6 +2018,7 @@ new("UIGridLayout", {
 }, ReactionPanel)
 
 local activePopupMessage = nil
+local activePopupIsDM = false
 local closePopup
 local setLocalReaction
 local fetchReactionsForMessage
@@ -1954,6 +2176,8 @@ function closePopup()
     PopupShade.Visible = false
     ReactionPanel.Visible = false
     activePopupMessage = nil
+    activePopupIsDM = false
+    ReactAction.Visible = true
 end
 
 PopupShade.InputBegan:Connect(function(input)
@@ -1972,7 +2196,7 @@ end)
 
 CopyAction.MouseButton1Click:Connect(function()
     if activePopupMessage then
-        copyText(activePopupMessage.message or "")
+        copyText(activePopupMessage.type == "sticker" and "Sticker" or (activePopupMessage.message or ""))
     end
     closePopup()
 end)
@@ -1984,16 +2208,20 @@ ReactAction.MouseButton1Click:Connect(function()
     end
 end)
 
-local function openMessagePopup(message)
+local function openMessagePopup(message, isDM)
     activePopupMessage = message
+    activePopupIsDM = isDM == true
     PopupShade:SetAttribute("MessageKey", message.key)
     PopupPreview.Text = tostring(message.type == "sticker" and "Sticker" or (message.message or ""))
-    ReactionPanel.Visible = true
+    ReactAction.Visible = not activePopupIsDM
+    ReactionPanel.Visible = not activePopupIsDM
     PopupShade.Visible = true
-    loadReactionAssets()
-    task.spawn(function()
-        fetchReactionsForMessage(message.key)
-    end)
+    if not activePopupIsDM then
+        loadReactionAssets()
+        task.spawn(function()
+            fetchReactionsForMessage(message.key)
+        end)
+    end
 end
 
 -- -----------------------------------------------------------------------------
