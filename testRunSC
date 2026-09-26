@@ -1034,6 +1034,8 @@ local function clearStickerGrid()
     end
 end
 
+local sendDM
+
 local function sendSticker(sticker)
     if not sticker then return end
     local publicUrl = sticker.url or stickerPublicUrl(activeStickerCategory, sticker)
@@ -1543,6 +1545,7 @@ local function loadDMCandidates()
 end
 
 local loadDMMessages
+local openMessagePopup
 
 local function renderDMMessage(msg)
     if not msg or not msg.key or dmSeen[msg.key] then return end
@@ -1720,7 +1723,7 @@ local function ensureDMThread()
     return ok
 end
 
-local function sendDM(stickerUrl, stickerAsset)
+sendDM = function(stickerUrl, stickerAsset)
     if not activeDMUser then return false end
     if not DMAuth.idToken and not dmRefreshAuthToken() then
         Input.PlaceholderText="DM authentication failed"
@@ -2208,7 +2211,7 @@ ReactAction.MouseButton1Click:Connect(function()
     end
 end)
 
-local function openMessagePopup(message, isDM)
+openMessagePopup = function(message, isDM)
     activePopupMessage = message
     activePopupIsDM = isDM == true
     PopupShade:SetAttribute("MessageKey", message.key)
