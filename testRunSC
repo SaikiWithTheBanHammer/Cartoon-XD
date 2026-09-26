@@ -1,3 +1,22 @@
+--[[
+    SAIKI RECHAT v12
+    Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
+
+    Key changes from v1:
+      - Keeps the 425x359 aspect ratio (very close to the reference ratio)
+      - Much smaller, content-sized message bubbles
+      - Compact header/composer and cleaner spacing
+      - Own messages render IMMEDIATELY (optimistic UI) instead of waiting for polling
+      - No emoji characters are used for interface buttons
+      - Long-press / hold opens ONE centered action popup
+      - Reply / Copy / React are inside that popup
+      - Reaction picker is inside the popup instead of sitting beside messages
+      - Maximum 50 rendered cards
+      - Server-only Firebase path using Roblox JobId
+      - Existing messages are ignored when the script starts
+      - 5 second local slow mode
+]]
+
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -708,6 +727,36 @@ local function getStickerAsset(repoName, branch, item)
     return nil, "getcustomasset failed"
 end
 
+local function stickerPublicUrl(categoryIndex, sticker)
+    if not sticker then return nil end
+    if type(sticker.url) == "string" and sticker.url ~= "" then return sticker.url end
+    local cat = STICKER_REPOS[categoryIndex]
+    local meta = stickerMeta[categoryIndex]
+    if not cat or not meta or not meta.branch or not sticker.path then return nil end
+    return "https://raw.githubusercontent.com/" .. GITHUB_OWNER .. "/" .. cat.repo .. "/" .. encodePath(meta.branch .. "/" .. sticker.path)
+end
+
+-- Messages contain a public raw GitHub URL so every client can resolve the
+-- same sticker. Each client then downloads that URL once and converts it to a
+-- local getcustomasset() URL for ImageLabel.Image.
+local function cacheRemoteSticker(url)
+    if type(url) ~= "string" or url == "" then return nil end
+    if not (writefile and isfile and getcustomasset) then return url end
+
+    local safe = url:gsub("^https?://", ""):gsub("[^%w%._%-]", "_")
+    local path = STICKER_CACHE_FOLDER .. "/message__" .. safe
+    if not isfile(path) then
+        local ok, body = httpGetBody(url, { ["User-Agent"] = "Saiki-Rechat" })
+        if not ok or type(body) ~= "string" or #body == 0 then return nil end
+        local wrote = pcall(writefile, path, body)
+        if not wrote or not isfile(path) then return nil end
+    end
+
+    local okAsset, asset = pcall(getcustomasset, path)
+    if okAsset and asset then return asset end
+    return nil
+end
+
 local function clearStickerGrid()
     for _, c in ipairs(StickerScroll:GetChildren()) do
         if c:IsA("GuiButton") or c:IsA("ImageButton") or c:IsA("ImageLabel") then
@@ -718,6 +767,11 @@ end
 
 local function sendSticker(sticker)
     if not sticker then return end
+    local publicUrl = sticker.url or stickerPublicUrl(activeStickerCategory, sticker)
+    if not publicUrl or publicUrl == "" then
+        StickerStatus.Text = "Sticker URL unavailable"
+        return
+    end
     local elapsed = os.clock() - lastSentAt
     if elapsed < SLOW_MODE then
         showSlowMode(SLOW_MODE - elapsed)
@@ -734,7 +788,8 @@ local function sendSticker(sticker)
         username = profile.username,
         displayName = profile.displayName,
         type = "sticker",
-        sticker = sticker.url,
+        sticker = publicUrl,
+        _stickerAsset = sticker.asset,
         timestamp = DateTime.now().UnixTimestampMillis,
     }
     if replyKey then message.replyTo = replyKey end
@@ -847,6 +902,8 @@ local function renderStickerGrid()
                 end
 
                 if asset and b and b.Parent then
+                    sticker.asset = asset
+                    sticker.url = stickerPublicUrl(activeStickerCategory, sticker)
                     b.Image = asset
                     local label = b:FindFirstChildOfClass("TextLabel")
                     if label then label.Visible = false end
@@ -1645,9 +1702,21 @@ renderMessage = function(message)
     if isSticker then
         local stickerImage = new("ImageLabel", {
             BackgroundTransparency=1, Position=UDim2.fromOffset(7, contentY),
-            Size=UDim2.new(1,-14,0,bodyHeight), Image=tostring(message.sticker or ""),
+            Size=UDim2.new(1,-14,0,bodyHeight), Image=tostring(message._stickerAsset or ""),
             ScaleType=Enum.ScaleType.Fit, ZIndex=2
         }, bubble)
+
+        -- Firebase stores the public GitHub URL, not the sender's local
+        -- executor asset path. Receivers cache that URL locally before
+        -- assigning it to ImageLabel.Image.
+        if not message._stickerAsset and message.sticker then
+            task.spawn(function()
+                local asset = cacheRemoteSticker(tostring(message.sticker))
+                if asset and stickerImage and stickerImage.Parent then
+                    stickerImage.Image = asset
+                end
+            end)
+        end
     else
         new("TextLabel", {
             BackgroundTransparency = 1, Position = UDim2.fromOffset(10, contentY),
