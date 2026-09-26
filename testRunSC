@@ -1558,6 +1558,7 @@ local function renderDMMessage(msg)
         BackgroundTransparency=1,
         Size=UDim2.new(1,0,0,bubbleHeight+5),
     }, DMConversation)
+    holder:SetAttribute("DMMessageKey", tostring(msg.key))
     if msg._optimistic then holder:SetAttribute("DMOptimisticKey", msg.key) end
 
     local bubble = new("Frame", {
@@ -1682,7 +1683,7 @@ end
 loadDMMessages = function()
     if not activeDMUser or not DMAuth.idToken then return end
     local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
-    local extra='orderBy="$key"&limitToLast=60'
+    local extra='orderBy="$key"&limitToLast=30'
     local ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
     if not ok and dmRefreshAuthToken() then
         ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
@@ -1694,6 +1695,22 @@ loadDMMessages = function()
     end
     table.sort(list,function(a,b) return tostring(a.key)<tostring(b.key) end)
     for _,msg in ipairs(list) do renderDMMessage(msg) end
+
+    -- A DM conversation always keeps only the newest 30 visible messages.
+    -- This is count-based, not time-based: it does not matter whether they
+    -- were sent seconds, days, or months ago.
+    local visible = {}
+    for _,child in ipairs(DMConversation:GetChildren()) do
+        if child:IsA("Frame") and child ~= DMConversation:FindFirstChildOfClass("UIListLayout") then
+            table.insert(visible, child)
+        end
+    end
+    while #visible > 30 do
+        local oldest = table.remove(visible, 1)
+        local key = oldest:GetAttribute("DMMessageKey")
+        if key then dmSeen[key] = nil end
+        oldest:Destroy()
+    end
 end
 
 local function ensureDMThread()
