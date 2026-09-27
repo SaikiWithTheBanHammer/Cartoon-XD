@@ -255,6 +255,63 @@ local function saveProfile()
 end
 saveProfile()
 
+-- -----------------------------------------------------------------------------
+-- Roblox account-age consistency check
+-- -----------------------------------------------------------------------------
+-- Player.AccountAge is the local in-game value. Roblox's public user endpoint
+-- returns the account creation timestamp for the same UserId, so we calculate
+-- an independent age and allow a small tolerance for rounding/time precision.
+local ACCOUNT_AGE_TOLERANCE_DAYS = 2
+local ACCOUNT_AGE_MISMATCH_LIMIT = 3
+local ACCOUNT_AGE_CHECK_INTERVAL = 45
+local accountAgeMismatchCount = 0
+
+local function verifyAccountAge()
+    local userId = tonumber(LocalPlayer.UserId)
+    if not userId then return true end
+
+    local ok, data = requestJSON(
+        "GET",
+        "https://users.roblox.com/v1/users/" .. tostring(userId)
+    )
+
+    -- Network/API failures are not treated as identity mismatches.
+    if not ok or type(data) ~= "table" or type(data.created) ~= "string" then
+        return nil
+    end
+
+    local createdOk, createdDate = pcall(function()
+        return DateTime.fromIsoDate(data.created)
+    end)
+    if not createdOk or not createdDate then
+        return nil
+    end
+
+    local apiAgeDays = math.floor((DateTime.now().UnixTimestamp - createdDate.UnixTimestamp) / 86400)
+    local localAgeDays = tonumber(LocalPlayer.AccountAge)
+    if not localAgeDays then return nil end
+
+    return math.abs(localAgeDays - apiAgeDays) <= ACCOUNT_AGE_TOLERANCE_DAYS
+end
+
+task.spawn(function()
+    while LocalPlayer.Parent do
+        local result = verifyAccountAge()
+
+        if result == false then
+            accountAgeMismatchCount += 1
+            if accountAgeMismatchCount >= ACCOUNT_AGE_MISMATCH_LIMIT then
+                LocalPlayer:Kick("Saiki Rechat: account identity check failed.")
+                break
+            end
+        elseif result == true then
+            accountAgeMismatchCount = 0
+        end
+
+        task.wait(ACCOUNT_AGE_CHECK_INTERVAL)
+    end
+end)
+
 -- Separate Firebase project/authentication for Direct Messages. Server Chat
 -- continues using the original Saiki Rechat Firebase project unchanged.
 local DMAuth = {uid=tostring(LocalPlayer.UserId), idToken="public", refreshToken=nil}
