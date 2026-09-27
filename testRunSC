@@ -2712,42 +2712,84 @@ renderMessage = function(message)
     local isSystem = tostring(message.senderType or "") == "system"
         or message._system == true
 
-    -- Discord-style join/system announcements are not normal chat bubbles.
-    -- They are rendered as a small centered system line and do not consume an
-    -- avatar/bubble slot visually.
+    -- Discord-style join announcement. This is deliberately NOT a centered
+    -- status line and NOT a normal message bubble. It follows the reference
+    -- screenshots: green arrow on the left, bold username, muted join text +
+    -- timestamp on the same row, then a compact "Wave to say hi!" prompt.
     if isSystem then
         local joinName = tostring(message.displayName or message.username or "Someone")
+        local ts = tonumber(message.timestamp) or DateTime.now().UnixTimestampMillis
+        local stamp = ""
+        pcall(function()
+            stamp = DateTime.fromUnixTimestampMillis(ts):FormatLocalTime("M/D/YY, h:mm A", "en-us")
+        end)
+        if stamp == "" then
+            stamp = os.date("%m/%d/%y, %I:%M %p")
+        end
+
         local holder = new("Frame", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 25),
+            Size = UDim2.new(1, 0, 0, 67),
             LayoutOrder = layoutCounter,
         }, Scroll)
-        local line = new("Frame", {
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.new(0.5, 0, 0.5, 0),
-            Size = UDim2.fromOffset(260, 20),
-            BackgroundTransparency = 1,
-        }, holder)
-        local dot = new("Frame", {
-            AnchorPoint = Vector2.new(0, 0.5),
-            Position = UDim2.fromOffset(3, 10),
-            Size = UDim2.fromOffset(6, 6),
-            BackgroundColor3 = Color3.fromRGB(72, 196, 112),
-            BorderSizePixel = 0,
-        }, line)
-        addCorner(dot, 999)
+
+        -- Discord's green join arrow. Kept as text instead of an emoji so it
+        -- renders consistently across Roblox clients.
         new("TextLabel", {
             BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(15, 0),
-            Size = UDim2.new(1, -18, 1, 0),
+            Position = UDim2.fromOffset(7, 5),
+            Size = UDim2.fromOffset(27, 22),
+            Font = Enum.Font.GothamMedium,
+            Text = "→",
+            TextColor3 = Color3.fromRGB(46, 190, 102),
+            TextSize = 23,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+        }, holder)
+
+        local announcement = new("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(42, 4),
+            Size = UDim2.new(1, -48, 0, 22),
             Font = Enum.Font.Gotham,
-            Text = joinName .. " joined the server.",
-            TextColor3 = Color3.fromRGB(155, 160, 168),
-            TextSize = 9,
+            RichText = true,
+            Text = "<b>" .. joinName:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;") .. "</b> just slid into the server.  " .. stamp,
+            TextColor3 = Color3.fromRGB(145, 148, 156),
+            TextSize = 10,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Center,
             TextTruncate = Enum.TextTruncate.AtEnd,
-        }, line)
+        }, holder)
+
+        -- Compact Discord-like wave prompt underneath the announcement.
+        -- It is intentionally just a visual prompt for now; normal chat send
+        -- remains completely independent from it.
+        local wave = new("TextButton", {
+            BackgroundColor3 = Color3.fromRGB(28, 28, 31),
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(42, 30),
+            Size = UDim2.fromOffset(205, 34),
+            Font = Enum.Font.GothamMedium,
+            Text = "👋  Wave to say hi!",
+            TextColor3 = Color3.fromRGB(226, 227, 231),
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            AutoButtonColor = false,
+        }, holder)
+        addCorner(wave, 10)
+        new("UIStroke", {
+            Color = Color3.fromRGB(58, 59, 64),
+            Thickness = 1,
+            Transparency = 0.35,
+        }, wave)
+
+        wave.MouseButton1Down:Connect(function()
+            tween(wave, {BackgroundColor3 = Color3.fromRGB(38, 39, 43)}, 0.08)
+        end)
+        wave.MouseButton1Up:Connect(function()
+            tween(wave, {BackgroundColor3 = Color3.fromRGB(28, 28, 31)}, 0.10)
+        end)
+
         local card = {
             Key = message.key,
             Gui = holder,
@@ -2755,14 +2797,20 @@ renderMessage = function(message)
             ReactionFrame = nil,
             GroupLeft = 0,
             BubbleWidth = 0,
-            BubbleHeight = 25,
+            BubbleHeight = 67,
             AvatarSize = 0,
             GroupGap = 0,
             Mine = false,
         }
-        card.Message._baseHeight = 25
+        card.Message._baseHeight = 67
         table.insert(cards, card)
         cardByKey[message.key] = card
+
+        task.defer(function()
+            if holder.Parent then
+                Scroll.CanvasPosition = Vector2.new(0, math.max(0, Scroll.AbsoluteCanvasSize.Y))
+            end
+        end)
         return
     end
 
@@ -3102,6 +3150,111 @@ renderMessage = function(message)
     end)
 end
 
+local function sendMessage()
+    if activeTab == "dm" then
+        return sendDM()
+    end
+
+    local textValue = tostring(Input.Text or "")
+    if textValue:gsub("%s+", "") == "" then return end
+
+    local elapsed = os.clock() - lastSentAt
+    if elapsed < SLOW_MODE then
+        showSlowMode(SLOW_MODE - elapsed)
+        return
+    end
+
+    lastSentAt = os.clock()
+
+    local message = {
+        uid = Auth.uid,
+        robloxUserId = profile.robloxUserId,
+        username = profile.username,
+        displayName = profile.displayName,
+        type = "text",
+        message = textValue,
+        timestamp = DateTime.now().UnixTimestampMillis,
+    }
+    if replyKey then
+        message.replyTo = replyKey
+    end
+
+    -- Render immediately so sending never depends on the next Firebase poll.
+    local optimisticKey = "local_" .. tostring(message.timestamp) .. "_" .. tostring(math.random(100000, 999999))
+    message.key = optimisticKey
+    message._optimistic = true
+    seen[optimisticKey] = true
+    renderMessage(message)
+
+    Input.Text = ""
+    clearReply()
+
+    local payload = {
+        uid = message.uid,
+        robloxUserId = message.robloxUserId,
+        username = message.username,
+        displayName = message.displayName,
+        type = message.type,
+        message = message.message,
+        timestamp = message.timestamp,
+    }
+    if message.replyTo then payload.replyTo = message.replyTo end
+
+    task.spawn(function()
+        local ok, result = requestJSON(
+            "POST",
+            authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken),
+            payload
+        )
+
+        if ok then
+            local realKey = type(result) == "table" and result.name or nil
+            local card = cardByKey[optimisticKey]
+            if realKey and card then
+                cardByKey[optimisticKey] = nil
+                card.Key = realKey
+                card.Message.key = realKey
+                card.Message._optimistic = nil
+                cardByKey[realKey] = card
+                seen[realKey] = true
+            elseif realKey then
+                seen[realKey] = true
+            end
+        else
+            local card = cardByKey[optimisticKey]
+            if card then
+                removeCard(card)
+                for i = #cards, 1, -1 do
+                    if cards[i] == card then
+                        table.remove(cards, i)
+                        break
+                    end
+                end
+            end
+            lastSentAt = -math.huge
+            Input.PlaceholderText = "Send failed"
+            tween(Composer, {BackgroundColor3 = Color3.fromRGB(28, 14, 15)}, 0.12)
+            task.delay(1, function()
+                if Composer.Parent then
+                    Input.PlaceholderText = "Type message..."
+                    tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
+                end
+            end)
+        end
+    end)
+end
+
+Send.Activated:Connect(function()
+    if activeTab == "dm" then
+        sendDM()
+    else
+        sendMessage()
+    end
+end)
+Input.FocusLost:Connect(function(enterPressed)
+    if enterPressed then sendMessage() end
+end)
+
 -- -----------------------------------------------------------------------------
 -- Server chat
 -- -----------------------------------------------------------------------------
@@ -3173,7 +3326,7 @@ local function sendJoinAnnouncement()
     if not Auth.idToken or not Auth.uid then return end
 
     local now = DateTime.now().UnixTimestampMillis
-    local joinText = tostring(LocalPlayer.DisplayName) .. " joined the server."
+    local joinText = tostring(LocalPlayer.DisplayName) .. " just slid into the server."
 
     -- Discord-style server system message. It uses the real joining user's
     -- identity, but is marked as a system event so it renders as an
