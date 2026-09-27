@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v15
+    SAIKI RECHAT v20.3
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -1766,7 +1766,7 @@ local function renderDMMessage(msg)
     if msg._optimistic then holder:SetAttribute("DMOptimisticKey", msg.key) end
 
     local bubble = new("Frame", {
-        BackgroundColor3=mine and Color3.fromRGB(24,61,53) or Color3.fromRGB(20,20,22),
+        BackgroundColor3=mine and Color3.fromRGB(24,61,53) or Color3.fromRGB(39,40,46),
         BorderSizePixel=0,
         Position=UDim2.new(mine and 1 or 0, mine and -bubbleWidth-3 or 3, 0, 0),
         Size=UDim2.fromOffset(bubbleWidth,bubbleHeight),
@@ -2709,6 +2709,62 @@ renderMessage = function(message)
     local isUltron = message._ultron == true
         or tostring(message.senderType or "") == "ultron"
         or tostring(message.displayName or "") == ULTRON_NAME
+    local isSystem = tostring(message.senderType or "") == "system"
+        or message._system == true
+
+    -- Discord-style join/system announcements are not normal chat bubbles.
+    -- They are rendered as a small centered system line and do not consume an
+    -- avatar/bubble slot visually.
+    if isSystem then
+        local joinName = tostring(message.displayName or message.username or "Someone")
+        local holder = new("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 25),
+            LayoutOrder = layoutCounter,
+        }, Scroll)
+        local line = new("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            Size = UDim2.fromOffset(260, 20),
+            BackgroundTransparency = 1,
+        }, holder)
+        local dot = new("Frame", {
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.fromOffset(3, 10),
+            Size = UDim2.fromOffset(6, 6),
+            BackgroundColor3 = Color3.fromRGB(72, 196, 112),
+            BorderSizePixel = 0,
+        }, line)
+        addCorner(dot, 999)
+        new("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(15, 0),
+            Size = UDim2.new(1, -18, 1, 0),
+            Font = Enum.Font.Gotham,
+            Text = joinName .. " joined the server.",
+            TextColor3 = Color3.fromRGB(155, 160, 168),
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, line)
+        local card = {
+            Key = message.key,
+            Gui = holder,
+            Message = message,
+            ReactionFrame = nil,
+            GroupLeft = 0,
+            BubbleWidth = 0,
+            BubbleHeight = 25,
+            AvatarSize = 0,
+            GroupGap = 0,
+            Mine = false,
+        }
+        card.Message._baseHeight = 25
+        table.insert(cards, card)
+        cardByKey[message.key] = card
+        return
+    end
 
     local mine = not isUltron and (
         tostring(message.uid) == tostring(Auth.uid)
@@ -2838,7 +2894,7 @@ renderMessage = function(message)
     -- Only the sender identity/avatar remains Ultron.
     local bubble = new("Frame", {
         -- Self = muted WhatsApp-green, incoming = the existing charcoal bubble.
-        BackgroundColor3 = mine and Color3.fromRGB(24, 61, 53) or Color3.fromRGB(20, 20, 22),
+        BackgroundColor3 = mine and Color3.fromRGB(24, 61, 53) or Color3.fromRGB(39, 40, 46),
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(
             mine and groupLeft or groupLeft + avatarSize + groupGap,
@@ -3113,139 +3169,43 @@ showSlowMode = function(seconds)
     end)
 end
 
-local ULTRON_JOIN_PHRASES = {
-    "%s Just Crashed into Chat",
-    "%s Just Landed, everyone Say Hi!",
-    "YOOOOOOOO %s WB yawrr!!!",
-    "%s Just Pulled Up — Make Some Noise!",
-    "%s Has Entered the Server — W Chat!",
-    "%s Touchdown! Welcome to the chaos!",
-}
-
-local function sendUltronJoinMessage()
+local function sendJoinAnnouncement()
     if not Auth.idToken or not Auth.uid then return end
 
-    local template = ULTRON_JOIN_PHRASES[math.random(1, #ULTRON_JOIN_PHRASES)]
-    local joinText = string.format(template, tostring(LocalPlayer.DisplayName))
     local now = DateTime.now().UnixTimestampMillis
+    local joinText = tostring(LocalPlayer.DisplayName) .. " joined the server."
 
-    -- This is an app-level Ultron identity inside Saiki Rechat. It is stored
-    -- through the current anonymous Firebase client, then every Rechat client
-    -- renders it as Saiki's Ultron instead of as the joining player.
+    -- Discord-style server system message. It uses the real joining user's
+    -- identity, but is marked as a system event so it renders as an
+    -- announcement instead of a normal left/right chat bubble.
     local message = {
         uid = Auth.uid,
-        robloxUserId = 0,
-        username = ULTRON_NAME,
-        displayName = ULTRON_NAME,
+        robloxUserId = LocalPlayer.UserId,
+        username = LocalPlayer.Name,
+        displayName = LocalPlayer.DisplayName,
+        senderType = "system",
         type = "text",
         message = joinText,
         timestamp = now,
-        _ultron = true,
-        _ultronAsset = ULTRON_ASSET,
+        _system = true,
     }
 
-    local optimisticKey = "local_ultron_" .. tostring(now) .. "_" .. tostring(math.random(100000, 999999))
+    local optimisticKey = "local_join_" .. tostring(now) .. "_" .. tostring(math.random(100000, 999999))
     message.key = optimisticKey
     message._optimistic = true
     seen[optimisticKey] = true
     renderMessage(message)
 
-    local payload = {
-        uid = message.uid,
-        robloxUserId = 0,
-        username = ULTRON_NAME,
-        displayName = ULTRON_NAME,
-        type = "text",
-        message = joinText,
-        timestamp = now,
-    }
-
-    task.spawn(function()
-        local ok, result = requestJSON(
-            "POST",
-            authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken),
-            payload
-        )
-
-        if ok then
-            local realKey = type(result) == "table" and result.name or nil
-            local card = cardByKey[optimisticKey]
-            if realKey and card then
-                cardByKey[optimisticKey] = nil
-                card.Key = realKey
-                card.Message.key = realKey
-                card.Message._optimistic = nil
-                cardByKey[realKey] = card
-                seen[realKey] = true
-            elseif realKey then
-                seen[realKey] = true
-            end
-        else
-            local card = cardByKey[optimisticKey]
-            if card then
-                removeCard(card)
-                for i = #cards, 1, -1 do
-                    if cards[i] == card then
-                        table.remove(cards, i)
-                        break
-                    end
-                end
-            end
-        end
-    end)
-end
-
-local function sendMessage()
-    if activeTab == "dm" then
-        return sendDM()
-    end
-    -- Preserve the textbox contents exactly. Only use a trimmed copy to decide
-    -- whether the message is effectively empty; never trim or truncate what is sent.
-    local textValue = tostring(Input.Text or "")
-    if textValue:gsub("%s+", "") == "" then return end
-
-    local elapsed = os.clock() - lastSentAt
-    if elapsed < SLOW_MODE then
-        showSlowMode(SLOW_MODE - elapsed)
-        return
-    end
-
-    lastSentAt = os.clock()
-
-    local message = {
-        uid = Auth.uid,
-        robloxUserId = profile.robloxUserId,
-        username = profile.username,
-        displayName = profile.displayName,
-        type = "text",
-        message = textValue,
-        timestamp = DateTime.now().UnixTimestampMillis,
-    }
-    if replyKey then
-        message.replyTo = replyKey
-    end
-
-    -- Render locally FIRST. The sender never waits for Firebase/polling to see their own message.
-    local optimisticKey = "local_" .. tostring(message.timestamp) .. "_" .. tostring(math.random(100000, 999999))
-    message.key = optimisticKey
-    message._optimistic = true
-    seen[optimisticKey] = true
-    renderMessage(message)
-
-    Input.Text = ""
-    clearReply()
-
-    -- Do not send client-only UI fields to Firebase.
     local payload = {
         uid = message.uid,
         robloxUserId = message.robloxUserId,
         username = message.username,
         displayName = message.displayName,
-        type = message.type,
-        message = message.message,
-        timestamp = message.timestamp,
+        senderType = "system",
+        type = "text",
+        message = joinText,
+        timestamp = now,
     }
-    if message.replyTo then payload.replyTo = message.replyTo end
 
     task.spawn(function()
         local ok, result = requestJSON(
@@ -3257,7 +3217,6 @@ local function sendMessage()
         if ok then
             local realKey = type(result) == "table" and result.name or nil
             local card = cardByKey[optimisticKey]
-
             if realKey and card then
                 cardByKey[optimisticKey] = nil
                 card.Key = realKey
@@ -3269,7 +3228,6 @@ local function sendMessage()
                 seen[realKey] = true
             end
         else
-            -- The optimistic card is removed only if the actual write fails.
             local card = cardByKey[optimisticKey]
             if card then
                 removeCard(card)
@@ -3280,32 +3238,9 @@ local function sendMessage()
                     end
                 end
             end
-            lastSentAt = -math.huge
-            Input.PlaceholderText = "Send failed"
-            tween(Composer, {BackgroundColor3 = Color3.fromRGB(28, 14, 15)}, 0.12)
-            task.delay(1, function()
-                if Composer.Parent then
-                    Input.PlaceholderText = "Type message..."
-                    tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
-                end
-            end)
         end
     end)
 end
-Send.Activated:Connect(function()
-    if activeTab == "dm" then
-        sendDM()
-    else
-        sendMessage()
-    end
-end)
-Input.FocusLost:Connect(function(enterPressed)
-    if enterPressed then sendMessage() end
-end)
-
--- Do not enforce a client-side character limit here. Roblox/Firebase can store
--- the full TextBox value, and changing Input.Text while the user is typing was
--- the cause of the tail of longer messages being silently discarded.
 
 -- Start in Server Chat with the normal composer visible.
 Composer.Visible = true
@@ -3318,7 +3253,7 @@ loadDMCandidates()
 
 -- Announce this client entering the current JobId server after the pre-join
 -- snapshot is taken, so the join message itself is treated as new.
-task.delay(0.35, sendUltronJoinMessage)
+task.delay(0.35, sendJoinAnnouncement)
 
 -- Poll only for messages created after joining.
 task.spawn(function()
@@ -3369,4 +3304,4 @@ applyCleanTheme = function(name,animate)
     if THEMES[name] then currentThemeName=name end
 end
 
-print("[Saiki Rechat v20.2] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v20.3] Loaded | Server: " .. tostring(game.JobId))
