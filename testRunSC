@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v15
+    SAIKI RECHAT v17
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -255,63 +255,6 @@ local function saveProfile()
 end
 saveProfile()
 
--- -----------------------------------------------------------------------------
--- Roblox account-age consistency check
--- -----------------------------------------------------------------------------
--- Player.AccountAge is the local in-game value. Roblox's public user endpoint
--- returns the account creation timestamp for the same UserId, so we calculate
--- an independent age and allow a small tolerance for rounding/time precision.
-local ACCOUNT_AGE_TOLERANCE_DAYS = 2
-local ACCOUNT_AGE_MISMATCH_LIMIT = 3
-local ACCOUNT_AGE_CHECK_INTERVAL = 45
-local accountAgeMismatchCount = 0
-
-local function verifyAccountAge()
-    local userId = tonumber(LocalPlayer.UserId)
-    if not userId then return true end
-
-    local ok, data = requestJSON(
-        "GET",
-        "https://users.roblox.com/v1/users/" .. tostring(userId)
-    )
-
-    -- Network/API failures are not treated as identity mismatches.
-    if not ok or type(data) ~= "table" or type(data.created) ~= "string" then
-        return nil
-    end
-
-    local createdOk, createdDate = pcall(function()
-        return DateTime.fromIsoDate(data.created)
-    end)
-    if not createdOk or not createdDate then
-        return nil
-    end
-
-    local apiAgeDays = math.floor((DateTime.now().UnixTimestamp - createdDate.UnixTimestamp) / 86400)
-    local localAgeDays = tonumber(LocalPlayer.AccountAge)
-    if not localAgeDays then return nil end
-
-    return math.abs(localAgeDays - apiAgeDays) <= ACCOUNT_AGE_TOLERANCE_DAYS
-end
-
-task.spawn(function()
-    while LocalPlayer.Parent do
-        local result = verifyAccountAge()
-
-        if result == false then
-            accountAgeMismatchCount += 1
-            if accountAgeMismatchCount >= ACCOUNT_AGE_MISMATCH_LIMIT then
-                LocalPlayer:Kick("Saiki Rechat: account identity check failed.")
-                break
-            end
-        elseif result == true then
-            accountAgeMismatchCount = 0
-        end
-
-        task.wait(ACCOUNT_AGE_CHECK_INTERVAL)
-    end
-end)
-
 -- Separate Firebase project/authentication for Direct Messages. Server Chat
 -- continues using the original Saiki Rechat Firebase project unchanged.
 local DMAuth = {uid=tostring(LocalPlayer.UserId), idToken="public", refreshToken=nil}
@@ -367,6 +310,8 @@ local function addStroke(parent, color, transparency, thickness)
     }, parent)
 end
 
+local Main
+
 local function tween(object, properties, duration)
     TweenService:Create(
         object,
@@ -374,6 +319,154 @@ local function tween(object, properties, duration)
         properties
     ):Play()
 end
+
+
+-- -----------------------------------------------------------------------------
+-- Theme system
+-- -----------------------------------------------------------------------------
+local THEMES = {
+    Midnight = {
+        Background = CurrentTheme.Background, Surface = CurrentTheme.Surface,
+        Surface2 = Color3.fromRGB(20, 20, 23), BubbleMine = CurrentTheme.BubbleMine,
+        BubbleOther = CurrentTheme.BubbleOther, Text = Color3.fromRGB(232, 232, 235),
+        Muted = Color3.fromRGB(155, 155, 162), Border = Color3.fromRGB(42, 42, 45),
+        Accent = CurrentTheme.Accent,
+    },
+    Ultron = {
+        Background = Color3.fromRGB(7, 5, 6), Surface = Color3.fromRGB(16, 11, 13),
+        Surface2 = Color3.fromRGB(25, 17, 19), BubbleMine = Color3.fromRGB(42, 25, 29),
+        BubbleOther = Color3.fromRGB(25, 19, 21), Text = Color3.fromRGB(245, 239, 241),
+        Muted = Color3.fromRGB(175, 145, 151), Border = Color3.fromRGB(72, 39, 45),
+        Accent = Color3.fromRGB(220, 55, 75),
+    },
+    SoftcorePink = {
+        Background = Color3.fromRGB(255, 247, 251), Surface = Color3.fromRGB(255, 255, 255),
+        Surface2 = Color3.fromRGB(255, 240, 246), BubbleMine = Color3.fromRGB(255, 232, 241),
+        BubbleOther = Color3.fromRGB(255, 240, 246), Text = Color3.fromRGB(74, 59, 66),
+        Muted = Color3.fromRGB(155, 135, 144), Border = Color3.fromRGB(245, 220, 231),
+        Accent = Color3.fromRGB(232, 137, 170),
+    },
+    LavenderDream = {
+        Background = Color3.fromRGB(249, 247, 255), Surface = Color3.fromRGB(255, 255, 255),
+        Surface2 = Color3.fromRGB(243, 238, 255), BubbleMine = Color3.fromRGB(235, 226, 255),
+        BubbleOther = Color3.fromRGB(244, 240, 255), Text = Color3.fromRGB(67, 60, 82),
+        Muted = Color3.fromRGB(137, 128, 155), Border = Color3.fromRGB(224, 215, 244),
+        Accent = Color3.fromRGB(158, 132, 220),
+    },
+    CloudBlue = {
+        Background = Color3.fromRGB(246, 251, 255), Surface = Color3.fromRGB(255, 255, 255),
+        Surface2 = Color3.fromRGB(234, 245, 255), BubbleMine = Color3.fromRGB(222, 239, 255),
+        BubbleOther = Color3.fromRGB(237, 247, 255), Text = Color3.fromRGB(54, 68, 82),
+        Muted = Color3.fromRGB(125, 143, 160), Border = Color3.fromRGB(211, 230, 247),
+        Accent = Color3.fromRGB(105, 174, 225),
+    },
+    Pearl = {
+        Background = Color3.fromRGB(247, 247, 248), Surface = Color3.fromRGB(255, 255, 255),
+        Surface2 = Color3.fromRGB(239, 239, 242), BubbleMine = Color3.fromRGB(232, 232, 236),
+        BubbleOther = Color3.fromRGB(242, 242, 245), Text = Color3.fromRGB(54, 54, 60),
+        Muted = Color3.fromRGB(130, 130, 138), Border = Color3.fromRGB(220, 220, 224),
+        Accent = Color3.fromRGB(125, 125, 135),
+    },
+}
+
+local CURRENT_THEME_NAME = "Midnight"
+local CurrentTheme = THEMES[CURRENT_THEME_NAME]
+local ThemeTweens = {}
+
+local function themeRoleFromColor(c, kind)
+    if kind == "background" then
+        for themeName, palette in pairs(THEMES) do
+            for _, role in ipairs({"Background","Surface","Surface2","BubbleMine","BubbleOther"}) do
+                if c == palette[role] then return role end
+            end
+        end
+        local r,g,b = math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5)
+        if r==5 and g==5 and b==6 then return "Background" end
+        if r==31 and g==31 and b==34 then return "BubbleMine" end
+        if r==20 and g==20 and b==22 then return "BubbleOther" end
+        if (r==13 and g==13 and b==15) or (r==16 and g==16 and b==19) then return "Surface" end
+        if (r==10 and g==10 and b==12) or (r==17 and g==17 and b==19) or (r==18 and g==18 and b==20)
+            or (r==20 and g==20 and b==23) or (r==23 and g==23 and b==26) or (r==24 and g==24 and b==27)
+            or (r==27 and g==27 and b==30) or (r==34 and g==34 and b==38) then return "Surface2" end
+    elseif kind == "text" then
+        for themeName, palette in pairs(THEMES) do
+            for _, role in ipairs({"Text","Muted"}) do
+                if c == palette[role] then return role end
+            end
+        end
+        local r,g,b = math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5)
+        if r>=205 and g>=205 and b>=205 then return "Text" end
+        if r<=190 and g<=190 and b<=195 then return "Muted" end
+    elseif kind == "stroke" or kind == "scroll" then
+        return "Border"
+    end
+end
+
+local function themeTagTree(root)
+    for _, obj in ipairs(root:GetDescendants()) do
+        if obj:IsA("GuiObject") then
+            local role = themeRoleFromColor(obj.BackgroundColor3, "background")
+            if role then obj:SetAttribute("SaikiThemeRole", role) end
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+                role = themeRoleFromColor(obj.TextColor3, "text")
+                if role then obj:SetAttribute("SaikiThemeTextRole", role) end
+            end
+            if obj:IsA("ScrollingFrame") then
+                obj:SetAttribute("SaikiThemeScrollRole", "Border")
+            end
+        elseif obj:IsA("UIStroke") then
+            obj:SetAttribute("SaikiThemeStrokeRole", "Border")
+        end
+    end
+end
+
+local function cancelThemeTweens()
+    for _, tw in ipairs(ThemeTweens) do pcall(function() tw:Cancel() end) end
+    table.clear(ThemeTweens)
+end
+
+local function applyTheme(themeName, instant)
+    local theme = THEMES[themeName]
+    if not theme then return end
+    CURRENT_THEME_NAME = themeName
+    CurrentTheme = theme
+    cancelThemeTweens()
+
+    local function setProperty(obj, property, value)
+        if instant then
+            obj[property] = value
+        else
+            local tw = TweenService:Create(obj, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {[property]=value})
+            table.insert(ThemeTweens, tw)
+            tw:Play()
+        end
+    end
+
+    for _, obj in ipairs(Main:GetDescendants()) do
+        local role = obj:GetAttribute("SaikiThemeRole")
+        if role and theme[role] and obj:IsA("GuiObject") then setProperty(obj, "BackgroundColor3", theme[role]) end
+        role = obj:GetAttribute("SaikiThemeTextRole")
+        if role and theme[role] and (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox")) then setProperty(obj, "TextColor3", theme[role]) end
+        role = obj:GetAttribute("SaikiThemeStrokeRole")
+        if role and theme[role] and obj:IsA("UIStroke") then setProperty(obj, "Color", theme[role]) end
+        role = obj:GetAttribute("SaikiThemeScrollRole")
+        if role and theme[role] and obj:IsA("ScrollingFrame") then setProperty(obj, "ScrollBarImageColor3", theme[role]) end
+    end
+end
+
+local function saveTheme(themeName)
+    pcall(function()
+        if makefolder and not isfolder(CACHE_FOLDER) then makefolder(CACHE_FOLDER) end
+        if writefile then writefile(CACHE_FOLDER .. "/theme.txt", themeName) end
+    end)
+end
+
+pcall(function()
+    if isfile and readfile and isfile(CACHE_FOLDER .. "/theme.txt") then
+        local saved = readfile(CACHE_FOLDER .. "/theme.txt")
+        if THEMES[saved] then CURRENT_THEME_NAME = saved; CurrentTheme = THEMES[saved] end
+    end
+end)
 
 -- Deterministic Roblox-like name colors. Each display name gets the same
 -- color every time it appears, while different names are distributed across
@@ -421,16 +514,16 @@ local ScreenGui = new("ScreenGui", {
 }, GuiParent)
 
 -- Main window: 425x359, matching the reference aspect ratio.
-local Main = new("Frame", {
+Main = new("Frame", {
     Name = "Main",
     Size = UDim2.fromOffset(MAIN_W, MAIN_H),
     Position = UDim2.new(0.5, -MAIN_W / 2, 0.5, -MAIN_H / 2),
-    BackgroundColor3 = Color3.fromRGB(5, 5, 6),
+    BackgroundColor3 = CurrentTheme.Background,
     BorderSizePixel = 0,
     Active = true,
 }, ScreenGui)
 addCorner(Main, 17)
-addStroke(Main, Color3.fromRGB(31, 31, 34), 0.05, 1)
+addStroke(Main, CurrentTheme.BubbleMine, 0.05, 1)
 
 -- Header is intentionally compact.
 local Header = new("Frame", {
@@ -441,23 +534,49 @@ local Header = new("Frame", {
     Active = true,
 }, Main)
 
--- Server Chat / DM switch. One tap changes between the two views.
+-- Compact tab switcher. Options appear only when pressed.
 local TabSwitch = new("TextButton", {
     Name = "TabSwitch",
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.fromOffset(28, 23),
-    Size = UDim2.fromOffset(32, 32),
-    BackgroundColor3 = Color3.fromRGB(16, 16, 19),
+    AnchorPoint = Vector2.new(0, 0.5),
+    Position = UDim2.fromOffset(10, 23),
+    Size = UDim2.fromOffset(72, 28),
+    BackgroundColor3 = CurrentTheme.Surface,
     BorderSizePixel = 0,
     Font = Enum.Font.GothamBold,
-    Text = "DM",
-    TextColor3 = Color3.fromRGB(225, 225, 230),
-    TextSize = 9,
+    Text = "Switch",
+    TextColor3 = CurrentTheme.Text,
+    TextSize = 10,
     AutoButtonColor = false,
-    ZIndex = 12,
+    ZIndex = 20,
 }, Header)
 addCorner(TabSwitch, 999)
-addStroke(TabSwitch, Color3.fromRGB(65, 65, 72), 0.35, 1)
+local TabSwitchStroke = addStroke(TabSwitch, CurrentTheme.Border, 0.35, 1)
+
+local TabPopover = new("Frame", {
+    Name = "TabPopover",
+    Position = UDim2.fromOffset(10, 50),
+    Size = UDim2.fromOffset(214, 40),
+    BackgroundColor3 = CurrentTheme.Surface,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 40,
+}, Main)
+addCorner(TabPopover, 13)
+local TabPopoverStroke = addStroke(TabPopover, CurrentTheme.Border, 0.2, 1)
+
+local function makeTabOption(name, x, width)
+    local b = new("TextButton", {
+        Position = UDim2.fromOffset(x, 4), Size = UDim2.fromOffset(width, 32),
+        BackgroundColor3 = CurrentTheme.Surface2, BackgroundTransparency = 0.2,
+        BorderSizePixel = 0, Text = name, TextSize = 9, Font = Enum.Font.GothamBold,
+        TextColor3 = CurrentTheme.Text, AutoButtonColor = false, ZIndex = 41,
+    }, TabPopover)
+    addCorner(b, 10)
+    return b
+end
+local DMTab = makeTabOption("DM", 4, 62)
+local ChatTab = makeTabOption("CHAT", 70, 62)
+local SettingsTab = makeTabOption("⚙", 136, 74)
 
 -- Anchor / Unanchor button, matching the Saiki Emotes behavior.
 local anchored = false
@@ -541,23 +660,105 @@ local DMRoot = new("Frame", {
     Visible = false,
 }, Main)
 
--- DM home: compact Discord-style directory. The search field is deliberately
--- blank; the two useful lists stay visible until the user actually searches.
-local DMTitle = new("TextLabel", {
+
+-- -----------------------------------------------------------------------------
+-- Settings tab
+-- -----------------------------------------------------------------------------
+local SettingsRoot = new("Frame", {
+    Name = "SettingsRoot",
+    Position = UDim2.fromOffset(12, 49),
+    Size = UDim2.new(1, -24, 1, -103),
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(4, 0),
-    Size = UDim2.new(1, -8, 0, 17),
-    Font = Enum.Font.GothamBold,
-    Text = "DIRECT MESSAGES",
-    TextColor3 = Color3.fromRGB(232, 232, 237),
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, DMRoot)
+    BorderSizePixel = 0,
+    Visible = false,
+}, Main)
+
+local SettingsTitle = new("TextLabel", {
+    Position = UDim2.fromOffset(4, 2), Size = UDim2.new(1,-8,0,28),
+    BackgroundTransparency = 1, Text = "Settings", TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.GothamBold, TextSize = 21, TextColor3 = CurrentTheme.Text,
+}, SettingsRoot)
+local SettingsSub = new("TextLabel", {
+    Position = UDim2.fromOffset(5, 29), Size = UDim2.new(1,-10,0,20),
+    BackgroundTransparency = 1, Text = "Customize your Saiki Rechat", TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = CurrentTheme.Muted,
+}, SettingsRoot)
+local AppearanceLabel = new("TextLabel", {
+    Position = UDim2.fromOffset(5, 58), Size = UDim2.new(1,-10,0,18),
+    BackgroundTransparency = 1, Text = "APPEARANCE", TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = CurrentTheme.Muted,
+}, SettingsRoot)
+
+local ThemeButton = new("TextButton", {
+    Position = UDim2.fromOffset(4, 79), Size = UDim2.new(1,-8,0,50),
+    BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0, Text = "", AutoButtonColor = false,
+}, SettingsRoot)
+addCorner(ThemeButton, 14)
+local ThemeButtonStroke = addStroke(ThemeButton, CurrentTheme.Border, 0.35, 1)
+local ThemeLabel = new("TextLabel", {
+    Position = UDim2.fromOffset(14, 6), Size = UDim2.new(1,-60,0,18), BackgroundTransparency = 1,
+    Text = "Theme", TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamBold,
+    TextSize = 12, TextColor3 = CurrentTheme.Text,
+}, ThemeButton)
+local ThemeValue = new("TextLabel", {
+    Position = UDim2.fromOffset(14, 25), Size = UDim2.new(1,-60,0,16), BackgroundTransparency = 1,
+    Text = CURRENT_THEME_NAME, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.Gotham,
+    TextSize = 9, TextColor3 = CurrentTheme.Muted,
+}, ThemeButton)
+local ThemeArrow = new("TextLabel", {
+    AnchorPoint = Vector2.new(1,0.5), Position = UDim2.new(1,-14,0.5,0), Size = UDim2.fromOffset(20,20),
+    BackgroundTransparency = 1, Text = ">", TextSize = 18, Font = Enum.Font.GothamBold,
+    TextColor3 = CurrentTheme.Muted,
+}, ThemeButton)
+
+local ThemePicker = new("Frame", {
+    Position = UDim2.fromOffset(4, 125), Size = UDim2.new(1,-8,0,130),
+    BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0, Visible = false, ZIndex = 30,
+}, SettingsRoot)
+addCorner(ThemePicker, 14)
+local ThemePickerStroke = addStroke(ThemePicker, CurrentTheme.Border, 0.35, 30)
+
+local themeNames = {"Midnight","Ultron","SoftcorePink","LavenderDream","CloudBlue","Pearl"}
+for i, themeName in ipairs(themeNames) do
+    local row = new("TextButton", {
+        Position = UDim2.fromOffset(7, 5 + (i-1)*20), Size = UDim2.new(1,-14,0,18),
+        BackgroundColor3 = CurrentTheme.Surface2, BackgroundTransparency = 0.18,
+        BorderSizePixel = 0, Text = themeName, TextXAlignment = Enum.TextXAlignment.Left,
+        Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = CurrentTheme.Text,
+        AutoButtonColor = false, ZIndex = 31,
+    }, ThemePicker)
+    addCorner(row, 9)
+    row.Activated:Connect(function()
+        saveTheme(themeName)
+        ThemeValue.Text = themeName
+        ThemePicker.Visible = false
+        themeTagTree(Main)
+        applyTheme(themeName, false)
+    end)
+end
+
+local PerformanceLabel = new("TextLabel", {
+    Position = UDim2.fromOffset(5, 206), Size = UDim2.new(1,-10,0,18), BackgroundTransparency = 1,
+    Text = "PERFORMANCE", TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = CurrentTheme.Muted,
+}, SettingsRoot)
+local PerformanceInfo = new("TextLabel", {
+    Position = UDim2.fromOffset(4, 226), Size = UDim2.new(1,-8,0,25),
+    BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0,
+    Text = "Low-lag design  •  incremental updates  •  no tab rebuilding",
+    TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
+    Font = Enum.Font.Gotham, TextSize = 8, TextColor3 = CurrentTheme.Muted,
+}, SettingsRoot)
+addCorner(PerformanceInfo, 12)
+
+themeTagTree(Main)
+applyTheme(CURRENT_THEME_NAME, true)
+ThemeValue.Text = CURRENT_THEME_NAME
 
 local DMSearch = new("TextBox", {
-    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
-    Position = UDim2.fromOffset(31, 21),
-    Size = UDim2.new(1, -31, 0, 32),
+    BackgroundColor3 = CurrentTheme.Surface,
+    Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.new(1, 0, 0, 36),
     BorderSizePixel = 0,
     ClearTextOnFocus = false,
     Font = Enum.Font.Gotham,
@@ -565,28 +766,16 @@ local DMSearch = new("TextBox", {
     PlaceholderText = "",
     PlaceholderColor3 = Color3.fromRGB(78, 78, 83),
     TextColor3 = Color3.fromRGB(232, 232, 235),
-    TextSize = 9,
+    TextSize = 10,
     TextXAlignment = Enum.TextXAlignment.Left,
 }, DMRoot)
-addCorner(DMSearch, 10)
+addCorner(DMSearch, 999)
 addStroke(DMSearch, Color3.fromRGB(30, 30, 33), 0.1, 1)
-new("TextLabel", {
-    BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(11, 21),
-    Size = UDim2.fromOffset(20, 32),
-    Font = Enum.Font.GothamBold,
-    Text = "⌕",
-    TextColor3 = Color3.fromRGB(105, 105, 112),
-    TextSize = 14,
-    TextXAlignment = Enum.TextXAlignment.Center,
-}, DMRoot)
-DMSearch.Text = ""
-DMSearch.PlaceholderText = ""
 
 local DMHome = new("Frame", {
     Name = "DMHome",
-    Position = UDim2.fromOffset(0, 59),
-    Size = UDim2.new(1, 0, 1, -59),
+    Position = UDim2.fromOffset(0, 44),
+    Size = UDim2.new(1, 0, 1, -44),
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
 }, DMRoot)
@@ -595,7 +784,7 @@ local DMServerPanel = new("Frame", {
     Name = "ServerPanel",
     Position = UDim2.fromOffset(0, 0),
     Size = UDim2.new(0.5, -4, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+    BackgroundColor3 = CurrentTheme.Surface2,
     BorderSizePixel = 0,
 }, DMHome)
 addCorner(DMServerPanel, 12)
@@ -605,39 +794,26 @@ local DMHistoryPanel = new("Frame", {
     Name = "HistoryPanel",
     Position = UDim2.new(0.5, 4, 0, 0),
     Size = UDim2.new(0.5, -4, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+    BackgroundColor3 = CurrentTheme.Surface2,
     BorderSizePixel = 0,
 }, DMHome)
 addCorner(DMHistoryPanel, 12)
 addStroke(DMHistoryPanel, Color3.fromRGB(28, 28, 32), 0.1, 1)
 
-local function makeDMPanelHeader(parent, title, subtitle)
-    new("TextLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(11, 7),
-        Size = UDim2.new(1, -22, 0, 13),
-        Font = Enum.Font.GothamBold,
-        Text = title,
-        TextColor3 = Color3.fromRGB(218, 218, 224),
-        TextSize = 8,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, parent)
-    new("TextLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(11, 20),
-        Size = UDim2.new(1, -22, 0, 9),
-        Font = Enum.Font.Gotham,
-        Text = subtitle,
-        TextColor3 = Color3.fromRGB(75, 75, 82),
-        TextSize = 6,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, parent)
-end
-makeDMPanelHeader(DMServerPanel, "IN THIS SERVER", "People you can message right now")
-makeDMPanelHeader(DMHistoryPanel, "CONVERSATIONS", "Your saved private conversations")
+new("TextLabel", {
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(11, 7), Size = UDim2.new(1, -22, 0, 16),
+    Font = Enum.Font.GothamBold, Text = "SERVER", TextColor3 = Color3.fromRGB(185, 185, 190), TextSize = 8,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, DMServerPanel)
+
+new("TextLabel", {
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(11, 7), Size = UDim2.new(1, -22, 0, 16),
+    Font = Enum.Font.GothamBold, Text = "HISTORY", TextColor3 = Color3.fromRGB(185, 185, 190), TextSize = 8,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, DMHistoryPanel)
 
 local DMServerList = new("ScrollingFrame", {
-    Name = "ServerList", Position = UDim2.fromOffset(6, 34), Size = UDim2.new(1, -12, 1, -40),
+    Name = "ServerList", Position = UDim2.fromOffset(6, 28), Size = UDim2.new(1, -12, 1, -34),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -645,7 +821,7 @@ local DMServerList = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, DMServerList)
 
 local DMHistoryList = new("ScrollingFrame", {
-    Name = "HistoryList", Position = UDim2.fromOffset(6, 34), Size = UDim2.new(1, -12, 1, -40),
+    Name = "HistoryList", Position = UDim2.fromOffset(6, 28), Size = UDim2.new(1, -12, 1, -34),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -653,7 +829,7 @@ local DMHistoryList = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, DMHistoryList)
 
 local DMResults = new("ScrollingFrame", {
-    Name = "SearchResults", Position = UDim2.fromOffset(0, 59), Size = UDim2.new(1, 0, 1, -59),
+    Name = "SearchResults", Position = UDim2.fromOffset(0, 44), Size = UDim2.new(1, 0, 1, -44),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
@@ -664,105 +840,48 @@ new("UIPadding", {PaddingBottom = UDim.new(0, 5)}, DMResults)
 local DMHeader = new("Frame", {
     Name = "ConversationHeader",
     Position = UDim2.fromOffset(0, 0),
-    Size = UDim2.new(1, 0, 0, 42),
-    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    Size = UDim2.new(1, 0, 0, 34),
+    BackgroundColor3 = CurrentTheme.Surface,
     BorderSizePixel = 0,
     Visible = false,
 }, DMRoot)
-addCorner(DMHeader, 11)
+addCorner(DMHeader, 10)
 addStroke(DMHeader, Color3.fromRGB(30, 30, 33), 0.1, 1)
 
 local DMBack = new("TextButton", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(5, 5), Size = UDim2.fromOffset(30, 32),
-    Font = Enum.Font.GothamBold, Text = "‹", TextColor3 = Color3.fromRGB(185, 185, 190), TextSize = 20, AutoButtonColor = false,
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(6, 3), Size = UDim2.fromOffset(28, 28),
+    Font = Enum.Font.GothamBold, Text = "<", TextColor3 = Color3.fromRGB(170, 170, 175), TextSize = 14, AutoButtonColor = false,
 }, DMHeader)
-
-local DMHeaderAvatar = new("ImageLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(35, 7), Size = UDim2.fromOffset(28, 28),
-    Image = "", ScaleType = Enum.ScaleType.Crop,
-}, DMHeader)
-addCorner(DMHeaderAvatar, 999)
-
-local DMStatusDot = new("Frame", {
-    AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromOffset(57, 34), Size = UDim2.fromOffset(8, 8),
-    BackgroundColor3 = Color3.fromRGB(75, 75, 82), BorderSizePixel = 0, ZIndex = 3,
-}, DMHeader)
-addCorner(DMStatusDot, 999)
 
 local DMTarget = new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(70, 5), Size = UDim2.new(1, -78, 0, 15),
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 4), Size = UDim2.new(1, -46, 0, 13),
     Font = Enum.Font.GothamBold, Text = "Direct Message", TextColor3 = Color3.fromRGB(230, 230, 235), TextSize = 10,
     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 }, DMHeader)
 
 local DMTargetUser = new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(70, 20), Size = UDim2.new(1, -78, 0, 10),
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 17), Size = UDim2.new(1, -46, 0, 10),
     Font = Enum.Font.Gotham, Text = "", TextColor3 = Color3.fromRGB(95, 95, 100), TextSize = 7,
     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 }, DMHeader)
 
 local DMConversation = new("ScrollingFrame", {
     Name = "Conversation",
-    Position = UDim2.fromOffset(0, 49),
-    Size = UDim2.new(1, 0, 1, -49),
+    Position = UDim2.fromOffset(0, 41),
+    Size = UDim2.new(1, 0, 1, -41),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y, Visible = false,
 }, DMRoot)
 new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center}, DMConversation)
-new("UIPadding", {PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 7)}, DMConversation)
-
--- Existing DM history is loaded only when the user explicitly asks for it.
--- This keeps opening a History row instant while giving a clear, obvious
--- recovery path when the conversation needs to be fetched from Firebase.
-local DMLoadMessagesOverlay = new("Frame", {
-    Name = "LoadMessagesOverlay",
-    Position = UDim2.fromOffset(0, 49),
-    Size = UDim2.new(1, 0, 1, -49),
-    BackgroundTransparency = 1,
-    BorderSizePixel = 0,
-    Visible = false,
-    ZIndex = 20,
-}, DMRoot)
-
-local DMLoadMessagesButton = new("TextButton", {
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(132, 38),
-    BackgroundColor3 = Color3.fromRGB(22, 22, 25),
-    BorderSizePixel = 0,
-    Font = Enum.Font.GothamBold,
-    Text = "Load Messages",
-    TextColor3 = Color3.fromRGB(232, 232, 235),
-    TextSize = 10,
-    AutoButtonColor = false,
-    ZIndex = 21,
-}, DMLoadMessagesOverlay)
-addCorner(DMLoadMessagesButton, 999)
-addStroke(DMLoadMessagesButton, Color3.fromRGB(42, 42, 47), 0.05, 1)
-
-local DMLoadMessagesEmptyLabel = new("TextLabel", {
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.new(1, -50, 0, 32),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.Gotham,
-    Text = "Message History Auto Cleared or Empty",
-    TextColor3 = Color3.fromRGB(92, 92, 100),
-    TextSize = 9,
-    TextWrapped = true,
-    TextXAlignment = Enum.TextXAlignment.Center,
-    TextYAlignment = Enum.TextYAlignment.Center,
-    Visible = false,
-    ZIndex = 21,
-}, DMLoadMessagesOverlay)
+new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 7)}, DMConversation)
 
 -- Composer.
 local Composer = new("Frame", {
     Name = "Composer",
     Position = UDim2.new(0, 12, 1, -51),
     Size = UDim2.new(1, -24, 0, 38),
-    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    BackgroundColor3 = CurrentTheme.Surface,
     BorderSizePixel = 0,
 }, Main)
 addCorner(Composer, 999)
@@ -782,9 +901,6 @@ local Input = new("TextBox", {
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Center,
 }, Composer)
--- Force the shared composer to start blank; DM mode never uses a default "TextBox" value.
-Input.Text = ""
-Input.PlaceholderText = ""
 
 -- Sticker button opens the sticker browser.
 local StickerOpen = new("TextButton", {
@@ -801,7 +917,7 @@ addCorner(StickerOpen, 14)
 
 -- Small circular image button using the user's SendIcon.jpg.
 local Send = new("ImageButton", {
-    BackgroundColor3 = Color3.fromRGB(24, 24, 27),
+    BackgroundColor3 = CurrentTheme.Surface2,
     Position = UDim2.new(1, -37, 0.5, -14),
     Size = UDim2.fromOffset(28, 28),
     Image = SEND_ASSET,
@@ -815,14 +931,14 @@ local ReplyBar = new("Frame", {
     Visible = false,
     Position = UDim2.new(0, 1, 0, -35),
     Size = UDim2.new(1, -2, 0, 31),
-    BackgroundColor3 = Color3.fromRGB(17, 17, 19),
+    BackgroundColor3 = CurrentTheme.Surface2,
     BorderSizePixel = 0,
     ZIndex = 10,
 }, Composer)
 addCorner(ReplyBar, 8)
 
 new("Frame", {
-    BackgroundColor3 = Color3.fromRGB(45, 160, 232),
+    BackgroundColor3 = CurrentTheme.Accent,
     BorderSizePixel = 0,
     Position = UDim2.fromOffset(0, 5),
     Size = UDim2.new(0, 2, 1, -10),
@@ -835,7 +951,7 @@ local ReplyLabel = new("TextLabel", {
     Size = UDim2.new(1, -42, 0, 10),
     Font = Enum.Font.GothamBold,
     Text = "REPLY",
-    TextColor3 = Color3.fromRGB(45, 160, 232),
+    TextColor3 = CurrentTheme.Accent,
     TextSize = 7,
     TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 11,
@@ -885,7 +1001,7 @@ local StickerPanel = new("Frame", {
     Name = "StickerPanel",
     Size = UDim2.fromOffset(330, 245),
     Position = UDim2.new(1, -342, 1, -299),
-    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+    BackgroundColor3 = CurrentTheme.Surface2,
     BackgroundTransparency = 0.02,
     BorderSizePixel = 0,
     Visible = false,
@@ -1276,7 +1392,7 @@ local function renderStickerGrid()
     local buttons = {}
     for i, sticker in ipairs(items) do
         local b = new("ImageButton", {
-            BackgroundColor3 = Color3.fromRGB(20,20,23),
+            BackgroundColor3 = CurrentTheme.Surface2,
             BorderSizePixel = 0,
             Image = "",
             ScaleType = Enum.ScaleType.Fit,
@@ -1619,7 +1735,6 @@ loadDMHistory()
 task.spawn(syncDMIncomingHistory)
 
 local ensureDMThread
-local dmLoadRequested = false
 
 local function addDMCandidate(map, userId, username, displayName, source)
     userId = tonumber(userId)
@@ -1641,115 +1756,57 @@ local function clearList(container)
 end
 
 local function makeDMRow(parent, candidate, compact)
-    local rowHeight = compact and 50 or 58
     local row = new("TextButton", {
-        BackgroundColor3 = Color3.fromRGB(15, 15, 17),
-        BorderSizePixel = 0,
-        Size = UDim2.new(1, 0, 0, rowHeight),
-        Font = Enum.Font.Gotham,
-        Text = "",
-        AutoButtonColor = false,
+        BackgroundColor3 = Color3.fromRGB(15, 15, 17), BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, compact and 39 or 44), Font = Enum.Font.Gotham, Text = "", AutoButtonColor = false,
     }, parent)
-    addCorner(row, 10)
-    addStroke(row, Color3.fromRGB(25, 25, 29), 0.1, 1)
-
-    local avatarSize = compact and 34 or 40
+    addCorner(row, 9)
+    local avatarSize = compact and 29 or 32
     local avatar = new("ImageLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(7, math.floor((rowHeight - avatarSize) / 2)),
-        Size = UDim2.fromOffset(avatarSize, avatarSize),
-        Image = getAvatar(candidate.Id),
-        ScaleType = Enum.ScaleType.Crop,
+        BackgroundTransparency = 1, Position = UDim2.fromOffset(5, math.floor((row.Size.Y.Offset-avatarSize)/2)),
+        Size = UDim2.fromOffset(avatarSize, avatarSize), Image=getAvatar(candidate.Id), ScaleType=Enum.ScaleType.Crop,
     }, row)
-    addCorner(avatar, 999)
-
-    local online = false
-    for _, player in ipairs(Players:GetPlayers()) do
-        if tonumber(player.UserId) == tonumber(candidate.Id) then online = true break end
-    end
-    local dot = new("Frame", {
-        AnchorPoint = Vector2.new(1, 1),
-        Position = UDim2.fromOffset(avatarSize + 11, math.floor((rowHeight - avatarSize) / 2) + avatarSize + 1),
-        Size = UDim2.fromOffset(9, 9),
-        BackgroundColor3 = online and Color3.fromRGB(55, 205, 105) or Color3.fromRGB(72, 72, 79),
-        BorderSizePixel = 0,
-        ZIndex = 4,
-    }, row)
-    addCorner(dot, 999)
-
+    addCorner(avatar, avatarSize/2)
     new("TextLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(50, compact and 8 or 9),
-        Size = UDim2.new(1, -86, 0, 15),
-        Font = Enum.Font.GothamBold,
-        Text = tostring(candidate.DisplayName or "Unknown"),
-        TextColor3 = Color3.fromRGB(228, 228, 233),
-        TextSize = compact and 8 or 9,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
+        BackgroundTransparency = 1, Position = UDim2.fromOffset(41, compact and 5 or 6), Size = UDim2.new(1,-46,0,13),
+        Font = Enum.Font.GothamBold, Text = candidate.DisplayName, TextColor3 = Color3.fromRGB(225,225,230), TextSize = compact and 8 or 9,
+        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
-
     new("TextLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(50, compact and 23 or 25),
-        Size = UDim2.new(1, -86, 0, 11),
-        Font = Enum.Font.Gotham,
-        Text = "@" .. tostring(candidate.Username or ""),
-        TextColor3 = Color3.fromRGB(92, 92, 98),
-        TextSize = 7,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    }, row)
-
-    local statusText = online and "Online" or "Offline"
-    if candidate.HasIncoming == true then statusText = "New message • " .. statusText end
-    new("TextLabel", {
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 50, 1, -17),
-        Size = UDim2.new(1, -58, 0, 10),
-        Font = Enum.Font.Gotham,
-        Text = statusText,
-        TextColor3 = candidate.HasIncoming == true and Color3.fromRGB(70, 195, 115) or Color3.fromRGB(68, 68, 75),
-        TextSize = 6,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
+        BackgroundTransparency = 1, Position = UDim2.fromOffset(41, compact and 19 or 22), Size = UDim2.new(1,-46,0,10),
+        Font = Enum.Font.Gotham, Text = "@"..candidate.Username, TextColor3 = Color3.fromRGB(92,92,98), TextSize = 7,
+        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
 
     if candidate.HasIncoming == true then
-        local badge = new("Frame", {
+        local incomingDot = new("Frame", {
+            Name = "IncomingDMIndicator",
             AnchorPoint = Vector2.new(1, 0.5),
-            Position = UDim2.new(1, -8, 0.5, 0),
-            Size = UDim2.fromOffset(7, 7),
+            Position = UDim2.new(1, -7, 0.5, 0),
+            Size = UDim2.fromOffset(8, 8),
             BackgroundColor3 = Color3.fromRGB(55, 205, 105),
             BorderSizePixel = 0,
         }, row)
-        addCorner(badge, 999)
+        addCorner(incomingDot, 999)
     end
 
     row.MouseButton1Click:Connect(function()
         activeDMUser = candidate
         DMSearch.Visible=false; DMHome.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
         DMTarget.Text=candidate.DisplayName; DMTargetUser.Text="@"..candidate.Username
-        DMHeaderAvatar.Image = getAvatar(candidate.Id)
-        local isOnline = false
-        for _, player in ipairs(Players:GetPlayers()) do
-            if tonumber(player.UserId) == tonumber(candidate.Id) then isOnline=true break end
-        end
-        DMStatusDot.BackgroundColor3 = isOnline and Color3.fromRGB(55,205,105) or Color3.fromRGB(72,72,79)
         Composer.Visible=true
         StickerOpen.Visible=true
         dmSeen={}
         for _, child in ipairs(DMConversation:GetChildren()) do
             if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
         end
-        Input.Text=""
         Input.PlaceholderText=""
-        dmLoadRequested = false
-        DMLoadMessagesButton.Visible = true
-        DMLoadMessagesButton.Text = "Load Messages"
-        DMLoadMessagesEmptyLabel.Visible = false
-        DMLoadMessagesOverlay.Visible = true
+        -- Create/restore the lightweight thread metadata before reading it.
+        -- This lets an existing DM conversation load immediately even when
+        -- the user has not sent a new message in that conversation.
         if not DMAuth.idToken then dmSignIn() end
+        ensureDMThread()
+        loadDMMessages()
     end)
     return row
 end
@@ -1990,79 +2047,22 @@ local function renderDMMessage(msg)
 end
 
 loadDMMessages = function()
-    if not activeDMUser then return end
-    if not DMAuth.idToken then dmSignIn() end
-    if not DMAuth.idToken then return end
-
+    if not activeDMUser or not DMAuth.idToken then return end
     local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
-    local messagesPath = "/dmThreads/" .. urlEncode(thread) .. "/messages"
-    local extra = 'limitToLast=30'
-
-    -- Read the messages directly. Opening a DM must never depend on the
-    -- thread metadata write that is only needed when sending a new message.
-    local ok, data = requestJSON("GET", dmAuthURL(messagesPath, DMAuth.idToken, extra))
+    local extra='orderBy="$key"&limitToLast=30'
+    local ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
     if not ok and dmRefreshAuthToken() then
-        ok, data = requestJSON("GET", dmAuthURL(messagesPath, DMAuth.idToken, extra))
+        ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
     end
-
-    -- Fallback for older/legacy thread layouts or query handling: read the
-    -- thread itself and extract its messages node. This is only used when the
-    -- optimized messages query fails, so normal DM loading stays lightweight.
-    if not ok or type(data) ~= "table" then
-        local rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
-        if not rootOK and dmRefreshAuthToken() then
-            rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
-        end
-        if rootOK and type(rootData) == "table" and type(rootData.messages) == "table" then
-            ok, data = true, rootData.messages
-        else
-            return false
-        end
+    if not ok then return end
+    local list={}
+    for key,msg in pairs(data or {}) do
+        if type(msg)=="table" then msg.key=key; table.insert(list,msg) end
     end
-
-    local list = {}
-    for key, msg in pairs(data or {}) do
-        if type(msg) == "table" then
-            local copy = {}
-            for field, value in pairs(msg) do copy[field] = value end
-            copy.key = tostring(key)
-            table.insert(list, copy)
-        end
-    end
-
-    -- If the optimized query returned an empty object, perform one direct
-    -- thread read as a safety net for existing/legacy conversations. This is
-    -- especially important for History entries created by an older script.
-    if #list == 0 then
-        local rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
-        if not rootOK and dmRefreshAuthToken() then
-            rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
-        end
-        if rootOK and type(rootData) == "table" and type(rootData.messages) == "table" then
-            for key, msg in pairs(rootData.messages) do
-                if type(msg) == "table" then
-                    local copy = {}
-                    for field, value in pairs(msg) do copy[field] = value end
-                    copy.key = tostring(key)
-                    table.insert(list, copy)
-                end
-            end
-        end
-    end
-
-    -- Firebase's key ordering is normally chronological because messages use
-    -- timestamp-based keys, but sorting by timestamp first also handles older
-    -- message formats safely.
-    table.sort(list, function(a, b)
-        local at = tonumber(a.timestamp) or 0
-        local bt = tonumber(b.timestamp) or 0
-        if at == bt then return tostring(a.key) < tostring(b.key) end
-        return at < bt
-    end)
-    while #list > 30 do table.remove(list, 1) end
+    table.sort(list,function(a,b) return tostring(a.key)<tostring(b.key) end)
 
     -- Opening an empty conversation must never create a History entry.
-    -- Once real messages/stickers exist, persist this person locally.
+    -- Once at least one real message/sticker exists, persist this person locally.
     if #list > 0 then
         local hasIncoming = false
         local latestAt = 0
@@ -2077,10 +2077,13 @@ loadDMMessages = function()
         rememberDMUser(activeDMUser, hasIncoming, latestAt)
     end
 
-    for _, msg in ipairs(list) do renderDMMessage(msg) end
+    for _,msg in ipairs(list) do renderDMMessage(msg) end
 
+    -- A DM conversation always keeps only the newest 30 visible messages.
+    -- This is count-based, not time-based: it does not matter whether they
+    -- were sent seconds, days, or months ago.
     local visible = {}
-    for _, child in ipairs(DMConversation:GetChildren()) do
+    for _,child in ipairs(DMConversation:GetChildren()) do
         if child:IsA("Frame") and child ~= DMConversation:FindFirstChildOfClass("UIListLayout") then
             table.insert(visible, child)
         end
@@ -2091,33 +2094,7 @@ loadDMMessages = function()
         if key then dmSeen[key] = nil end
         oldest:Destroy()
     end
-
-    dmLoadRequested = true
-    if #list == 0 then
-        DMLoadMessagesButton.Visible = false
-        DMLoadMessagesEmptyLabel.Visible = true
-        DMLoadMessagesOverlay.Visible = true
-    else
-        DMLoadMessagesButton.Visible = false
-        DMLoadMessagesEmptyLabel.Visible = false
-        DMLoadMessagesOverlay.Visible = false
-    end
-    return true
 end
-
-DMLoadMessagesButton.MouseButton1Click:Connect(function()
-    if not activeDMUser then return end
-    dmLoadRequested = true
-    DMLoadMessagesButton.Text = "Loading..."
-    local ok = loadDMMessages()
-    if not ok and activeDMUser then
-        dmLoadRequested = false
-        DMLoadMessagesButton.Visible = true
-        DMLoadMessagesButton.Text = "Load Messages"
-        DMLoadMessagesEmptyLabel.Visible = false
-        DMLoadMessagesOverlay.Visible = true
-    end
-end)
 
 ensureDMThread = function()
     if not activeDMUser then return false end
@@ -2275,7 +2252,6 @@ sendDM = function(stickerUrl, stickerAsset)
 
     -- Render only after Firebase accepted the write. This guarantees the card
     -- represents a real DM message instead of a local-only fake send.
-    dmLoadRequested = true
     dmSeen = {}
     for _, child in ipairs(DMConversation:GetChildren()) do
         if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
@@ -2289,9 +2265,6 @@ end
 local function closeDMConversation()
     activeDMUser=nil
     DMHeader.Visible=false; DMConversation.Visible=false; DMSearch.Visible=true; DMHome.Visible=true; DMResults.Visible=false
-    DMLoadMessagesOverlay.Visible=false
-    DMLoadMessagesButton.Text="Load Messages"
-    dmLoadRequested=false
     Composer.Visible=false
     StickerOpen.Visible=false
     StickerPanel.Visible=false
@@ -2300,30 +2273,30 @@ local function closeDMConversation()
     renderDMResults()
 end
 
+local function closeTabPopover()
+    TabPopover.Visible = false
+end
+
 local function switchTab(tab)
     activeTab=tab
     local dm=tab=="dm"
-    Scroll.Visible=not dm
+    local settings=tab=="settings"
+    Scroll.Visible=not dm and not settings
     DMRoot.Visible=dm
-    StickerOpen.Visible=(not dm) or activeDMUser ~= nil
-    TabSwitch.Text=dm and "CHAT" or "DM"
+    SettingsRoot.Visible=settings
+    Composer.Visible=not settings and (not dm or activeDMUser ~= nil)
+    StickerOpen.Visible=not settings and ((not dm) or activeDMUser ~= nil)
+    if settings then StickerPanel.Visible=false end
+    closeTabPopover()
     if dm then
         clearReply()
-        DMSearch.Text = ""
-        DMSearch.PlaceholderText = ""
         Input.Text=""
-        Input.PlaceholderText = ""
         Composer.Visible=activeDMUser ~= nil
         StickerOpen.Visible=activeDMUser ~= nil
         Input.PlaceholderText=""
         if not activeDMUser then
             DMHeader.Visible=false
             DMConversation.Visible=false
-            DMLoadMessagesOverlay.Visible=false
-            DMLoadMessagesButton.Visible=true
-            DMLoadMessagesButton.Text="Load Messages"
-            DMLoadMessagesEmptyLabel.Visible=false
-            dmLoadRequested=false
             DMSearch.Visible=true
             DMHome.Visible=true
             DMResults.Visible=false
@@ -2338,20 +2311,25 @@ local function switchTab(tab)
 end
 
 DMBack.MouseButton1Click:Connect(closeDMConversation)
--- Final startup guard: some executors briefly restore TextBox's default text during
--- GUI creation. Clear the DM fields again on the next task step so the lists are
--- immediately visible and never appear broken to a first-time user.
-task.defer(function()
-    DMSearch.Text = ""
-    DMSearch.PlaceholderText = ""
-    Input.Text = ""
-    if activeTab == "dm" then Input.PlaceholderText = "" end
-end)
-
 DMSearch:GetPropertyChangedSignal("Text"):Connect(function() if activeTab=="dm" and not activeDMUser then renderDMResults() end end)
 Players.PlayerAdded:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
 Players.PlayerRemoving:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
-TabSwitch.MouseButton1Click:Connect(function() switchTab(activeTab=="server" and "dm" or "server") end)
+TabSwitch.Activated:Connect(function()
+    TabPopover.Visible = not TabPopover.Visible
+end)
+DMTab.Activated:Connect(function() switchTab("dm") end)
+ChatTab.Activated:Connect(function() switchTab("server") end)
+SettingsTab.Activated:Connect(function() switchTab("settings") end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not TabPopover.Visible or input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    local p = input.Position
+    local function inside(gui)
+        local a, z = gui.AbsolutePosition, gui.AbsoluteSize
+        return p.X >= a.X and p.X <= a.X + z.X and p.Y >= a.Y and p.Y <= a.Y + z.Y
+    end
+    if not inside(TabPopover) and not inside(TabSwitch) then closeTabPopover() end
+end)
 
 -- -----------------------------------------------------------------------------
 -- Message state
@@ -2377,7 +2355,7 @@ clearReply = function()
     ReplyBar.Visible = false
     ReplyText.Text = ""
     if Composer and Composer.Parent then
-        tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.12)
+        tween(Composer, {BackgroundColor3 = CurrentTheme.Surface}, 0.12)
     end
 end
 
@@ -2426,7 +2404,7 @@ local Popup = new("Frame", {
     Name = "MessageActions",
     Size = UDim2.fromOffset(280, 270),
     Position = UDim2.new(0.5, -140, 0.5, -135),
-    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    BackgroundColor3 = CurrentTheme.Surface,
     BorderSizePixel = 0,
     ZIndex = 101,
 }, PopupShade)
@@ -2475,7 +2453,7 @@ new("UIListLayout", {
 
 local function popupButton(text)
     local b = new("TextButton", {
-        BackgroundColor3 = Color3.fromRGB(23, 23, 26),
+        BackgroundColor3 = CurrentTheme.Surface2,
         BorderSizePixel = 0,
         Size = UDim2.fromOffset(78, 34),
         Font = Enum.Font.GothamBold,
@@ -2844,7 +2822,7 @@ function updateReactionBadges(card)
         local count = counts[emoji]
         local pillWidth = count > 1 and 34 or 22
         local pill = new("Frame", {
-            BackgroundColor3 = Color3.fromRGB(27, 27, 30),
+            BackgroundColor3 = CurrentTheme.Surface2,
             BorderSizePixel = 0,
             Size = UDim2.fromOffset(pillWidth, 18),
             Position = UDim2.fromOffset((i - 1) * 24, 1),
@@ -3025,7 +3003,7 @@ renderMessage = function(message)
     -- geometry and color as every other message received from another user.
     -- Only the sender identity/avatar remains Ultron.
     local bubble = new("Frame", {
-        BackgroundColor3 = mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22),
+        BackgroundColor3 = mine and CurrentTheme.BubbleMine or CurrentTheme.BubbleOther,
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(
             mine and groupLeft or groupLeft + avatarSize + groupGap,
@@ -3060,7 +3038,7 @@ renderMessage = function(message)
 
     if replyPreview then
         local quote = new("Frame", {
-            BackgroundColor3 = Color3.fromRGB(27, 27, 30),
+            BackgroundColor3 = CurrentTheme.Surface2,
             BorderSizePixel = 0,
             Position = UDim2.fromOffset(8, contentY),
             Size = UDim2.new(1, -16, 0, 32),
@@ -3068,7 +3046,7 @@ renderMessage = function(message)
         addCorner(quote, 9)
 
         new("Frame", {
-            BackgroundColor3 = Color3.fromRGB(45, 160, 232),
+            BackgroundColor3 = CurrentTheme.Accent,
             BorderSizePixel = 0,
             Position = UDim2.fromOffset(0, 5),
             Size = UDim2.new(0, 2, 1, -10),
@@ -3211,56 +3189,39 @@ end
 -- -----------------------------------------------------------------------------
 -- Server chat
 -- -----------------------------------------------------------------------------
--- The old receiver used one Firebase push-key as a moving cutoff. That is
--- fragile around startup/polling races: a message written while the initial
--- snapshot was being taken could become the new cutoff and then be skipped.
--- Instead, take a startup snapshot of existing messages and thereafter render
--- every unseen message from the rolling window. The join timestamp keeps the
--- startup snapshot from swallowing a message that was actually sent after we
--- joined.
-local serverJoinTimestamp = DateTime.now().UnixTimestampMillis
 cutoffKey = nil
 seen = {}
 
-local function primeServerMessageSnapshot()
+local function getLatestKey()
     local ok, data = requestJSON(
         "GET",
         authURL(
             "/servers/" .. urlEncode(game.JobId) .. "/messages",
             Auth.idToken,
-            'orderBy="$key"&limitToLast=60'
+            'orderBy="$key"&limitToLast=1'
         )
     )
-    if not ok or type(data) ~= "table" then return false end
-
-    for key, msg in pairs(data) do
-        if type(msg) == "table" then
-            local stamp = tonumber(msg.timestamp) or 0
-            -- Only pre-join messages are suppressed. Anything written after
-            -- this client's join moment remains eligible for the next poll.
-            if stamp <= serverJoinTimestamp then
-                seen[tostring(key)] = true
-            end
-        end
-    end
-    return true
+    if not ok or type(data) ~= "table" then return nil end
+    for key in pairs(data) do return key end
+    return nil
 end
 
 local function getNewMessages()
+    local extra = 'orderBy="$key"&limitToLast=60'
+    if cutoffKey then
+        extra = 'orderBy="$key"&startAt="' .. urlEncode(cutoffKey) .. '"&limitToFirst=60'
+    end
+
     local ok, data = requestJSON(
         "GET",
-        authURL(
-            "/servers/" .. urlEncode(game.JobId) .. "/messages",
-            Auth.idToken,
-            'orderBy="$key"&limitToLast=60'
-        )
+        authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken, extra)
     )
     if not ok or type(data) ~= "table" then return end
 
     local list = {}
     for key, msg in pairs(data) do
         if type(msg) == "table" then
-            msg.key = tostring(key)
+            msg.key = key
             table.insert(list, msg)
         end
     end
@@ -3270,14 +3231,13 @@ local function getNewMessages()
     end)
 
     for _, msg in ipairs(list) do
-        local key = tostring(msg.key)
-        local stamp = tonumber(msg.timestamp) or 0
-        -- Render only genuinely new messages. A message written after the
-        -- startup moment is eligible even if its Firebase key is not the one
-        -- immediately following the previous poll.
-        if not seen[key] and stamp > serverJoinTimestamp then
-            seen[key] = true
+        -- startAt is inclusive in Firebase REST, so explicitly discard the
+        -- snapshot key itself. This prevents the last pre-join message from
+        -- appearing as if it was sent by someone after we joined.
+        if (not cutoffKey or tostring(msg.key) > tostring(cutoffKey)) and not seen[msg.key] then
+            seen[msg.key] = true
             renderMessage(msg)
+            cutoffKey = msg.key
         end
     end
 end
@@ -3288,7 +3248,7 @@ showSlowMode = function(seconds)
     task.delay(math.min(seconds, 1), function()
         if Composer.Parent then
             Input.PlaceholderText = "Type message..."
-            tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
+            tween(Composer, {BackgroundColor3 = CurrentTheme.Surface}, 0.18)
         end
     end)
 end
@@ -3466,7 +3426,7 @@ local function sendMessage()
             task.delay(1, function()
                 if Composer.Parent then
                     Input.PlaceholderText = "Type message..."
-                    tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
+                    tween(Composer, {BackgroundColor3 = CurrentTheme.Surface}, 0.18)
                 end
             end)
         end
@@ -3490,9 +3450,8 @@ end)
 -- Start in Server Chat with the normal composer visible.
 Composer.Visible = true
 
--- Snapshot existing messages without rendering them. Anything written after
--- serverJoinTimestamp will be picked up by the normal polling loop.
-primeServerMessageSnapshot()
+-- Snapshot the newest existing message. Nothing before this point is rendered.
+cutoffKey = getLatestKey()
 
 -- Load the DM contact pool in the background.
 loadDMCandidates()
@@ -3517,7 +3476,7 @@ task.spawn(function()
             if DMAuth.idToken then
                 syncDMIncomingHistory()
             end
-            if activeDMUser and DMAuth.idToken and dmLoadRequested then
+            if activeDMUser and DMAuth.idToken then
                 loadDMMessages()
             end
         elseif Auth.idToken then
@@ -3544,4 +3503,7 @@ getgenv().SaikiRechat = {
     Show = function() Main.Visible = true end,
 }
 
-print("[Saiki Rechat v16] Loaded | Server: " .. tostring(game.JobId))
+themeTagTree(Main)
+applyTheme(CURRENT_THEME_NAME, true)
+
+print("[Saiki Rechat v17] Loaded | Server: " .. tostring(game.JobId))
