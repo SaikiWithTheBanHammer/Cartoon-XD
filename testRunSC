@@ -405,14 +405,19 @@ end
 local function themeTagTree(root)
     for _, obj in ipairs(root:GetDescendants()) do
         if obj:IsA("GuiObject") then
-            local role = themeRoleFromColor(obj.BackgroundColor3, "background")
+            if obj:GetAttribute("SaikiThemeStatic") then
+                -- Theme selector previews keep their own palette and must not be
+                -- recolored when the active application theme changes.
+            else
+                local role = themeRoleFromColor(obj.BackgroundColor3, "background")
             if role then obj:SetAttribute("SaikiThemeRole", role) end
             if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
                 role = themeRoleFromColor(obj.TextColor3, "text")
                 if role then obj:SetAttribute("SaikiThemeTextRole", role) end
             end
-            if obj:IsA("ScrollingFrame") then
-                obj:SetAttribute("SaikiThemeScrollRole", "Border")
+                if obj:IsA("ScrollingFrame") then
+                    obj:SetAttribute("SaikiThemeScrollRole", "Border")
+                end
             end
         elseif obj:IsA("UIStroke") then
             obj:SetAttribute("SaikiThemeStrokeRole", "Border")
@@ -664,17 +669,34 @@ local DMRoot = new("Frame", {
 -- -----------------------------------------------------------------------------
 -- Settings tab
 -- -----------------------------------------------------------------------------
-local SettingsRoot = new("Frame", {
+-- Settings is its own lightweight ScrollingFrame.  The old version used a
+-- normal Frame, so mouse-wheel/touch scrolling could never work here.
+local SettingsRoot = new("ScrollingFrame", {
     Name = "SettingsRoot",
     Position = UDim2.fromOffset(12, 49),
     Size = UDim2.new(1, -24, 1, -103),
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
     Visible = false,
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = CurrentTheme.Border,
+    ScrollBarImageTransparency = 0.25,
+    CanvasSize = UDim2.fromOffset(0, 450),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+    ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+    ClipsDescendants = true,
 }, Main)
 
+local SettingsPadding = new("UIPadding", {
+    PaddingTop = UDim.new(0, 2),
+    PaddingBottom = UDim.new(0, 10),
+    PaddingLeft = UDim.new(0, 1),
+    PaddingRight = UDim.new(0, 5),
+}, SettingsRoot)
+
 local SettingsTitle = new("TextLabel", {
-    Position = UDim2.fromOffset(4, 2), Size = UDim2.new(1,-8,0,28),
+    Position = UDim2.fromOffset(4, 2), Size = UDim2.new(1,-9,0,28),
     BackgroundTransparency = 1, Text = "Settings", TextXAlignment = Enum.TextXAlignment.Left,
     Font = Enum.Font.GothamBold, TextSize = 21, TextColor3 = CurrentTheme.Text,
 }, SettingsRoot)
@@ -684,66 +706,215 @@ local SettingsSub = new("TextLabel", {
     Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = CurrentTheme.Muted,
 }, SettingsRoot)
 local AppearanceLabel = new("TextLabel", {
-    Position = UDim2.fromOffset(5, 58), Size = UDim2.new(1,-10,0,18),
+    Position = UDim2.fromOffset(5, 57), Size = UDim2.new(1,-10,0,18),
     BackgroundTransparency = 1, Text = "APPEARANCE", TextXAlignment = Enum.TextXAlignment.Left,
     Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = CurrentTheme.Muted,
 }, SettingsRoot)
 
+-- Current-theme card.  It is always visible, so the user can immediately see
+-- which theme is active without opening the selector.
 local ThemeButton = new("TextButton", {
-    Position = UDim2.fromOffset(4, 79), Size = UDim2.new(1,-8,0,50),
+    Position = UDim2.fromOffset(4, 79), Size = UDim2.new(1,-9,0,70),
     BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0, Text = "", AutoButtonColor = false,
 }, SettingsRoot)
 addCorner(ThemeButton, 14)
 local ThemeButtonStroke = addStroke(ThemeButton, CurrentTheme.Border, 0.35, 1)
+
 local ThemeLabel = new("TextLabel", {
-    Position = UDim2.fromOffset(14, 6), Size = UDim2.new(1,-60,0,18), BackgroundTransparency = 1,
-    Text = "Theme", TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamBold,
-    TextSize = 12, TextColor3 = CurrentTheme.Text,
+    Position = UDim2.fromOffset(14, 7), Size = UDim2.new(1,-164,0,18), BackgroundTransparency = 1,
+    Text = "Current theme", TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamBold,
+    TextSize = 11, TextColor3 = CurrentTheme.Text,
 }, ThemeButton)
 local ThemeValue = new("TextLabel", {
-    Position = UDim2.fromOffset(14, 25), Size = UDim2.new(1,-60,0,16), BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(14, 27), Size = UDim2.new(1,-164,0,17), BackgroundTransparency = 1,
     Text = CURRENT_THEME_NAME, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.Gotham,
     TextSize = 9, TextColor3 = CurrentTheme.Muted,
 }, ThemeButton)
-local ThemeArrow = new("TextLabel", {
-    AnchorPoint = Vector2.new(1,0.5), Position = UDim2.new(1,-14,0.5,0), Size = UDim2.fromOffset(20,20),
-    BackgroundTransparency = 1, Text = ">", TextSize = 18, Font = Enum.Font.GothamBold,
-    TextColor3 = CurrentTheme.Muted,
+local ThemeHint = new("TextLabel", {
+    Position = UDim2.fromOffset(14, 45), Size = UDim2.new(1,-164,0,14), BackgroundTransparency = 1,
+    Text = "Tap to choose a different theme", TextXAlignment = Enum.TextXAlignment.Left,
+    Font = Enum.Font.Gotham, TextSize = 7, TextColor3 = CurrentTheme.Muted,
 }, ThemeButton)
 
-local ThemePicker = new("Frame", {
-    Position = UDim2.fromOffset(4, 125), Size = UDim2.new(1,-8,0,130),
+-- Mini live preview: background + two bubbles + accent indicator.
+local ThemePreview = new("Frame", {
+    AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1,-32,0.5,0),
+    Size = UDim2.fromOffset(108, 52), BackgroundColor3 = CurrentTheme.Background,
+    BorderSizePixel = 0, ClipsDescendants = true,
+}, ThemeButton)
+addCorner(ThemePreview, 11)
+addStroke(ThemePreview, CurrentTheme.Border, 0.15, 1)
+local PreviewOther = new("Frame", {
+    Position = UDim2.fromOffset(8, 8), Size = UDim2.fromOffset(46, 15),
+    BackgroundColor3 = CurrentTheme.BubbleOther, BorderSizePixel = 0,
+}, ThemePreview)
+addCorner(PreviewOther, 999)
+local PreviewMine = new("Frame", {
+    AnchorPoint = Vector2.new(1,0), Position = UDim2.new(1,-8,0,28), Size = UDim2.fromOffset(42, 15),
+    BackgroundColor3 = CurrentTheme.BubbleMine, BorderSizePixel = 0,
+}, ThemePreview)
+addCorner(PreviewMine, 999)
+local PreviewAccent = new("Frame", {
+    Position = UDim2.fromOffset(8, 29), Size = UDim2.fromOffset(12, 3),
+    BackgroundColor3 = CurrentTheme.Accent, BorderSizePixel = 0,
+}, ThemePreview)
+addCorner(PreviewAccent, 999)
+local ThemeArrow = new("TextLabel", {
+    AnchorPoint = Vector2.new(1,0.5), Position = UDim2.new(1,-10,0.5,0), Size = UDim2.fromOffset(15,20),
+    BackgroundTransparency = 1, Text = ">", TextSize = 15, Font = Enum.Font.GothamBold,
+    TextColor3 = CurrentTheme.Muted, ZIndex = 5,
+}, ThemeButton)
+
+local ThemePicker = new("ScrollingFrame", {
+    Position = UDim2.fromOffset(4, 155), Size = UDim2.new(1,-9,0,210),
     BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0, Visible = false, ZIndex = 30,
+    ScrollBarThickness = 3, ScrollBarImageColor3 = CurrentTheme.Border,
+    CanvasSize = UDim2.fromOffset(0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+    ClipsDescendants = true,
 }, SettingsRoot)
 addCorner(ThemePicker, 14)
-local ThemePickerStroke = addStroke(ThemePicker, CurrentTheme.Border, 0.35, 30)
+local ThemePickerStroke = addStroke(ThemePicker, CurrentTheme.Border, 0.2, 1)
+new("UIPadding", {PaddingTop=UDim.new(0,7), PaddingBottom=UDim.new(0,7), PaddingLeft=UDim.new(0,7), PaddingRight=UDim.new(0,7)}, ThemePicker)
+new("UIListLayout", {Padding=UDim.new(0,5), SortOrder=Enum.SortOrder.LayoutOrder}, ThemePicker)
 
 local themeNames = {"Midnight","Ultron","SoftcorePink","LavenderDream","CloudBlue","Pearl"}
+local themeRows = {}
+local selectedThemeMarker
+
+local function prettyThemeName(name)
+    local map = {
+        SoftcorePink="Softcore Pink", LavenderDream="Lavender Dream", CloudBlue="Cloud Blue"
+    }
+    return map[name] or name
+end
+
+local function updateCurrentThemePreview(themeName)
+    local theme = THEMES[themeName]
+    if not theme then return end
+    ThemeValue.Text = prettyThemeName(themeName)
+    ThemePreview.BackgroundColor3 = theme.Background
+    PreviewOther.BackgroundColor3 = theme.BubbleOther
+    PreviewMine.BackgroundColor3 = theme.BubbleMine
+    PreviewAccent.BackgroundColor3 = theme.Accent
+    ThemeButton.BackgroundColor3 = theme.Surface
+    ThemeButtonStroke.Color = theme.Border
+    ThemeLabel.TextColor3 = theme.Text
+    ThemeValue.TextColor3 = theme.Muted
+    ThemeHint.TextColor3 = theme.Muted
+    ThemeArrow.TextColor3 = theme.Muted
+    ThemePicker.BackgroundColor3 = theme.Surface
+    ThemePickerStroke.Color = theme.Border
+    for name, row in pairs(themeRows) do
+        local palette = THEMES[name]
+        row.BackgroundColor3 = palette.Surface2
+        row.TextColor3 = palette.Text
+        local swatch = row:FindFirstChild("Swatch")
+        local accent = row:FindFirstChild("Accent")
+        local check = row:FindFirstChild("Selected")
+        if swatch then swatch.BackgroundColor3 = palette.Background end
+        if accent then accent.BackgroundColor3 = palette.Accent end
+        if check then
+            check.Visible = name == themeName
+            check.BackgroundColor3 = palette.Accent
+        end
+    end
+end
+
 for i, themeName in ipairs(themeNames) do
+    local palette = THEMES[themeName]
     local row = new("TextButton", {
-        Position = UDim2.fromOffset(7, 5 + (i-1)*20), Size = UDim2.new(1,-14,0,18),
-        BackgroundColor3 = CurrentTheme.Surface2, BackgroundTransparency = 0.18,
-        BorderSizePixel = 0, Text = themeName, TextXAlignment = Enum.TextXAlignment.Left,
-        Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = CurrentTheme.Text,
-        AutoButtonColor = false, ZIndex = 31,
+        Size = UDim2.new(1,0,0,48),
+        BackgroundColor3 = palette.Surface2,
+        BackgroundTransparency = 0,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 31,
+        LayoutOrder = i,
     }, ThemePicker)
-    addCorner(row, 9)
+    addCorner(row, 11)
+
+    local swatch = new("Frame", {
+        Name="Swatch", Position=UDim2.fromOffset(8,8), Size=UDim2.fromOffset(46,32),
+        BackgroundColor3=palette.Background, BorderSizePixel=0, ZIndex=32,
+    }, row)
+    addCorner(swatch, 8)
+    new("Frame", {
+        Name="Accent", Position=UDim2.fromOffset(7,24), Size=UDim2.fromOffset(16,3),
+        BackgroundColor3=palette.Accent, BorderSizePixel=0, ZIndex=33,
+    }, swatch)
+    local bubble = new("Frame", {
+        Position=UDim2.new(1,-9,0,7), AnchorPoint=Vector2.new(1,0), Size=UDim2.fromOffset(24,8),
+        BackgroundColor3=palette.BubbleMine, BorderSizePixel=0, ZIndex=33,
+    }, swatch)
+    addCorner(bubble, 999)
+    local bubble2 = new("Frame", {
+        Position=UDim2.fromOffset(8,17), Size=UDim2.fromOffset(27,8),
+        BackgroundColor3=palette.BubbleOther, BorderSizePixel=0, ZIndex=33,
+    }, swatch)
+    addCorner(bubble2, 999)
+
+    new("TextLabel", {
+        Position=UDim2.fromOffset(64,7), Size=UDim2.new(1,-105,0,18),
+        BackgroundTransparency=1, Text=prettyThemeName(themeName), TextXAlignment=Enum.TextXAlignment.Left,
+        Font=Enum.Font.GothamBold, TextSize=10, TextColor3=palette.Text, ZIndex=32,
+    }, row)
+    new("TextLabel", {
+        Position=UDim2.fromOffset(64,25), Size=UDim2.new(1,-105,0,14),
+        BackgroundTransparency=1, Text=(themeName == "SoftcorePink" and "Light • soft • lovely" or "Dark • balanced • compact"),
+        TextXAlignment=Enum.TextXAlignment.Left, Font=Enum.Font.Gotham, TextSize=7,
+        TextColor3=palette.Muted, ZIndex=32,
+    }, row)
+    local check = new("Frame", {
+        Name="Selected", AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,-10,0.5,0),
+        Size=UDim2.fromOffset(12,12), BackgroundColor3=palette.Accent, BorderSizePixel=0,
+        Visible=(themeName == CURRENT_THEME_NAME), ZIndex=34,
+    }, row)
+    addCorner(check, 999)
+    new("TextLabel", {
+        BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Text="✓", Font=Enum.Font.GothamBold,
+        TextSize=8, TextColor3=Color3.new(1,1,1), ZIndex=35,
+    }, check)
+
+    themeRows[themeName] = row
     row.Activated:Connect(function()
+        if CURRENT_THEME_NAME == themeName then
+            ThemePicker.Visible = false
+            return
+        end
         saveTheme(themeName)
-        ThemeValue.Text = themeName
         ThemePicker.Visible = false
         themeTagTree(Main)
         applyTheme(themeName, false)
+        updateCurrentThemePreview(themeName)
     end)
 end
 
+-- Keep each theme preview visually faithful to its own palette instead of
+-- allowing the global theme pass to recolor the preview list.
+ThemePicker:SetAttribute("SaikiThemeStatic", true)
+for _, obj in ipairs(ThemePicker:GetDescendants()) do
+    obj:SetAttribute("SaikiThemeStatic", true)
+end
+
+-- The previous build created the picker but never connected the Theme button.
+-- This is the missing interaction that prevented theme switching entirely.
+ThemeButton.Activated:Connect(function()
+    ThemePicker.Visible = not ThemePicker.Visible
+    if ThemePicker.Visible then
+        ThemePicker.CanvasPosition = Vector2.new(0,0)
+        updateCurrentThemePreview(CURRENT_THEME_NAME)
+    end
+end)
+
 local PerformanceLabel = new("TextLabel", {
-    Position = UDim2.fromOffset(5, 206), Size = UDim2.new(1,-10,0,18), BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(5, 377), Size = UDim2.new(1,-10,0,18), BackgroundTransparency = 1,
     Text = "PERFORMANCE", TextXAlignment = Enum.TextXAlignment.Left,
     Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = CurrentTheme.Muted,
 }, SettingsRoot)
 local PerformanceInfo = new("TextLabel", {
-    Position = UDim2.fromOffset(4, 226), Size = UDim2.new(1,-8,0,25),
+    Position = UDim2.fromOffset(4, 397), Size = UDim2.new(1,-9,0,32),
     BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0,
     Text = "Low-lag design  •  incremental updates  •  no tab rebuilding",
     TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
@@ -753,7 +924,7 @@ addCorner(PerformanceInfo, 12)
 
 themeTagTree(Main)
 applyTheme(CURRENT_THEME_NAME, true)
-ThemeValue.Text = CURRENT_THEME_NAME
+updateCurrentThemePreview(CURRENT_THEME_NAME)
 
 local DMSearch = new("TextBox", {
     BackgroundColor3 = CurrentTheme.Surface,
@@ -2287,6 +2458,7 @@ local function switchTab(tab)
     Composer.Visible=not settings and (not dm or activeDMUser ~= nil)
     StickerOpen.Visible=not settings and ((not dm) or activeDMUser ~= nil)
     if settings then StickerPanel.Visible=false end
+    if not settings then ThemePicker.Visible = false end
     closeTabPopover()
     if dm then
         clearReply()
@@ -2322,7 +2494,8 @@ ChatTab.Activated:Connect(function() switchTab("server") end)
 SettingsTab.Activated:Connect(function() switchTab("settings") end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
-    if not TabPopover.Visible or input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if not TabPopover.Visible then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
     local p = input.Position
     local function inside(gui)
         local a, z = gui.AbsolutePosition, gui.AbsoluteSize
