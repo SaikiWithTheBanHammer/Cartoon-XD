@@ -448,6 +448,9 @@ local function applyTheme(themeName, instant)
     end
 
     for _, obj in ipairs(Main:GetDescendants()) do
+        if obj:GetAttribute("SaikiThemeStatic") then
+            continue
+        end
         local role = obj:GetAttribute("SaikiThemeRole")
         if role and theme[role] and obj:IsA("GuiObject") then setProperty(obj, "BackgroundColor3", theme[role]) end
         role = obj:GetAttribute("SaikiThemeTextRole")
@@ -682,9 +685,8 @@ local SettingsRoot = new("ScrollingFrame", {
     ScrollBarImageColor3 = CurrentTheme.Border,
     ScrollBarImageTransparency = 0.25,
     CanvasSize = UDim2.fromOffset(0, 450),
-    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    AutomaticCanvasSize = Enum.AutomaticSize.None,
     ScrollingDirection = Enum.ScrollingDirection.Y,
-    ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
     ClipsDescendants = true,
 }, Main)
 
@@ -769,8 +771,9 @@ local ThemePicker = new("ScrollingFrame", {
     Position = UDim2.fromOffset(4, 155), Size = UDim2.new(1,-9,0,210),
     BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0, Visible = false, ZIndex = 30,
     ScrollBarThickness = 3, ScrollBarImageColor3 = CurrentTheme.Border,
-    CanvasSize = UDim2.fromOffset(0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-    ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+    CanvasSize = UDim2.fromOffset(0, 330),
+    AutomaticCanvasSize = Enum.AutomaticSize.None,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
     ClipsDescendants = true,
 }, SettingsRoot)
 addCorner(ThemePicker, 14)
@@ -3676,7 +3679,4 @@ getgenv().SaikiRechat = {
     Show = function() Main.Visible = true end,
 }
 
-themeTagTree(Main)
-applyTheme(CURRENT_THEME_NAME, true)
-
-print("[Saiki Rechat v17.1] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v18.2] Loaded | Server: " .. tostring(game.JobId))
