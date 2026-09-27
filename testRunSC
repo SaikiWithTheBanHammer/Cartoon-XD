@@ -648,10 +648,28 @@ local DMTarget = new("TextLabel", {
 }, DMHeader)
 
 local DMTargetUser = new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 17), Size = UDim2.new(1, -46, 0, 10),
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 17), Size = UDim2.new(1, -122, 0, 10),
     Font = Enum.Font.Gotham, Text = "", TextColor3 = Color3.fromRGB(95, 95, 100), TextSize = 7,
     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 }, DMHeader)
+
+-- Restored manual DM history loader. It deliberately stays in the conversation
+-- header so the user can refresh the current thread whenever they want.
+local LoadChatButton = new("TextButton", {
+    Name = "LoadChatButton",
+    BackgroundColor3 = Color3.fromRGB(24, 24, 27),
+    Position = UDim2.new(1, -74, 0, 6),
+    Size = UDim2.fromOffset(66, 22),
+    BorderSizePixel = 0,
+    Font = Enum.Font.GothamBold,
+    Text = "LOAD CHAT",
+    TextColor3 = Color3.fromRGB(190, 190, 196),
+    TextSize = 7,
+    AutoButtonColor = false,
+    ZIndex = 5,
+}, DMHeader)
+addCorner(LoadChatButton, 7)
+addStroke(LoadChatButton, Color3.fromRGB(48, 48, 53), 0.15, 1)
 
 local DMConversation = new("ScrollingFrame", {
     Name = "Conversation",
@@ -2172,6 +2190,40 @@ local function switchTab(tab)
     end
 end
 DMBack.MouseButton1Click:Connect(closeDMConversation)
+
+LoadChatButton.MouseButton1Click:Connect(function()
+    if not activeDMUser then return end
+    if not DMAuth.idToken then
+        dmSignIn()
+    end
+    if not DMAuth.idToken then
+        DMLoading.Text = "Unable to load chat"
+        DMLoading.Visible = true
+        return
+    end
+
+    -- Clear only the visible message cards, keep the loading label and layouts,
+    -- then explicitly reload the current Firebase thread.
+    for _, child in ipairs(DMConversation:GetChildren()) do
+        if child:IsA("GuiObject")
+            and child ~= DMLoading
+            and not child:IsA("UIListLayout")
+            and not child:IsA("UIPadding") then
+            child:Destroy()
+        end
+    end
+    dmSeen = {}
+    DMLoading.Text = "Loading chat..."
+    DMLoading.Visible = true
+    LoadChatButton.Text = "LOADING..."
+    task.spawn(function()
+        loadDMMessages()
+        if LoadChatButton.Parent then
+            LoadChatButton.Text = "LOAD CHAT"
+        end
+    end)
+end)
+
 DMSearch:GetPropertyChangedSignal("Text"):Connect(function() if activeTab=="dm" and not activeDMUser then renderDMResults() end end)
 DMSearchClear.Activated:Connect(function() DMSearch.Text=""; DMSearch:CaptureFocus() end)
 Players.PlayerAdded:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
@@ -2198,6 +2250,7 @@ replyPreviewText = nil
 lastSentAt = -math.huge
 local reactionState = {}
 local updateReactionBadges
+local sendMessage
 
 getAvatar = function(userId)
     return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(userId) .. "&width=48&height=48&format=png"
@@ -2244,59 +2297,113 @@ end
 
 -- -----------------------------------------------------------------------------
 -- -----------------------------------------------------------------------------
--- Instagram-style message action sheet
--- -----------------------------------------------------------------------------
+-- Detailed Instagram-style message action sheet
 local PopupShade = new("Frame", {
     Name = "PopupShade",
     Visible = false,
     Size = UDim2.fromScale(1, 1),
     BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-    BackgroundTransparency = 0.46,
+    BackgroundTransparency = 0.34,
     BorderSizePixel = 0,
     ZIndex = 300,
 }, ScreenGui)
 
 local Popup = new("Frame", {
     Name = "InstagramMessageActions",
-    Size = UDim2.fromOffset(304, 218),
+    Size = UDim2.fromOffset(338, 300),
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
-    BackgroundColor3 = Color3.fromRGB(18, 18, 20),
+    BackgroundColor3 = Color3.fromRGB(19, 19, 22),
     BorderSizePixel = 0,
     ZIndex = 301,
 }, PopupShade)
-addCorner(Popup, 16)
-addStroke(Popup, Color3.fromRGB(52, 52, 57), 0.05, 1)
+addCorner(Popup, 18)
+addStroke(Popup, Color3.fromRGB(66, 66, 72), 0.02, 1)
+
+-- subtle top accent
+local PopupAccent = new("Frame", {
+    BackgroundColor3 = Color3.fromRGB(90, 90, 98),
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(151, 7),
+    Size = UDim2.fromOffset(36, 3),
+    ZIndex = 303,
+}, Popup)
+addCorner(PopupAccent, 2)
+
+new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(16, 16),
+    Size = UDim2.new(1, -32, 0, 18),
+    Font = Enum.Font.GothamBold,
+    Text = "Message",
+    TextColor3 = Color3.fromRGB(242, 242, 246),
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 303,
+}, Popup)
+
+local PopupPreviewCard = new("Frame", {
+    BackgroundColor3 = Color3.fromRGB(28, 28, 32),
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(12, 39),
+    Size = UDim2.new(1, -24, 0, 52),
+    ZIndex = 302,
+}, Popup)
+addCorner(PopupPreviewCard, 11)
+
+local PopupSender = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(10, 6),
+    Size = UDim2.new(1, -20, 0, 14),
+    Font = Enum.Font.GothamBold,
+    Text = "Message",
+    TextColor3 = Color3.fromRGB(178, 178, 186),
+    TextSize = 8,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 303,
+}, PopupPreviewCard)
 
 local PopupPreview = new("TextLabel", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(16, 12),
-    Size = UDim2.new(1, -32, 0, 38),
+    Position = UDim2.fromOffset(10, 20),
+    Size = UDim2.new(1, -20, 0, 25),
     Font = Enum.Font.Gotham,
     Text = "",
-    TextColor3 = Color3.fromRGB(198, 198, 204),
+    TextColor3 = Color3.fromRGB(226, 226, 231),
     TextSize = 10,
     TextWrapped = true,
     TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Center,
+    TextYAlignment = Enum.TextYAlignment.Top,
     TextTruncate = Enum.TextTruncate.AtEnd,
-    ZIndex = 302,
+    ZIndex = 303,
+}, PopupPreviewCard)
+
+new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(14, 98),
+    Size = UDim2.new(1, -28, 0, 13),
+    Font = Enum.Font.GothamBold,
+    Text = "Quick reactions",
+    TextColor3 = Color3.fromRGB(150, 150, 158),
+    TextSize = 8,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 303,
 }, Popup)
 
 local QuickReactionBar = new("Frame", {
-    BackgroundColor3 = Color3.fromRGB(25, 25, 28),
+    BackgroundColor3 = Color3.fromRGB(27, 27, 31),
     BorderSizePixel = 0,
-    Position = UDim2.fromOffset(10, 55),
-    Size = UDim2.new(1, -20, 0, 43),
+    Position = UDim2.fromOffset(12, 112),
+    Size = UDim2.new(1, -24, 0, 38),
     ZIndex = 302,
 }, Popup)
-addCorner(QuickReactionBar, 13)
+addCorner(QuickReactionBar, 11)
 
 new("UIListLayout", {
     FillDirection = Enum.FillDirection.Horizontal,
     HorizontalAlignment = Enum.HorizontalAlignment.Center,
     VerticalAlignment = Enum.VerticalAlignment.Center,
-    Padding = UDim.new(0, 2),
+    Padding = UDim.new(0, 3),
     SortOrder = Enum.SortOrder.LayoutOrder,
 }, QuickReactionBar)
 
@@ -2334,14 +2441,12 @@ local function makeReactionButton(parent, reaction, size, z)
             fallback.Visible = false
         end
     end)
-
     return b
 end
 
--- The first 8 are the Instagram-like quick reaction row.
 for i = 1, math.min(8, #REACTIONS) do
     local reaction = REACTIONS[i]
-    local b = makeReactionButton(QuickReactionBar, reaction, UDim2.fromOffset(31, 35), 304)
+    local b = makeReactionButton(QuickReactionBar, reaction, UDim2.fromOffset(31, 32), 304)
     b.LayoutOrder = i
     b.MouseButton1Click:Connect(function()
         if activePopupMessage and toggleMyReaction(activePopupMessage.key, reaction) then
@@ -2352,11 +2457,10 @@ end
 
 local PopupButtons = new("Frame", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(12, 106),
-    Size = UDim2.new(1, -24, 0, 43),
+    Position = UDim2.fromOffset(12, 157),
+    Size = UDim2.new(1, -24, 0, 42),
     ZIndex = 302,
 }, Popup)
-
 new("UIListLayout", {
     FillDirection = Enum.FillDirection.Horizontal,
     HorizontalAlignment = Enum.HorizontalAlignment.Center,
@@ -2364,32 +2468,65 @@ new("UIListLayout", {
     Padding = UDim.new(0, 7),
 }, PopupButtons)
 
-local function popupButton(text)
+local function popupButton(title, subtitle)
     local b = new("TextButton", {
-        BackgroundColor3 = Color3.fromRGB(28, 28, 31),
+        BackgroundColor3 = Color3.fromRGB(29, 29, 33),
         BorderSizePixel = 0,
-        Size = UDim2.fromOffset(84, 37),
+        Size = UDim2.fromOffset(98, 40),
         Font = Enum.Font.GothamBold,
-        Text = text,
-        TextColor3 = Color3.fromRGB(225, 225, 230),
-        TextSize = 9,
+        Text = "",
         AutoButtonColor = false,
         ZIndex = 303,
     }, PopupButtons)
     addCorner(b, 10)
+    addStroke(b, Color3.fromRGB(55, 55, 61), 0.25, 1)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(8, 5),
+        Size = UDim2.new(1, -16, 0, 15),
+        Font = Enum.Font.GothamBold,
+        Text = title,
+        TextColor3 = Color3.fromRGB(235, 235, 239),
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 304,
+    }, b)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(8, 20),
+        Size = UDim2.new(1, -16, 0, 12),
+        Font = Enum.Font.Gotham,
+        Text = subtitle,
+        TextColor3 = Color3.fromRGB(135, 135, 144),
+        TextSize = 7,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 304,
+    }, b)
     return b
 end
 
-local ReplyAction = popupButton("REPLY")
-local CopyAction = popupButton("COPY")
-local ReactAction = popupButton("REACT")
+local ReplyAction = popupButton("REPLY", "Quote this message")
+local CopyAction = popupButton("COPY", "Copy message text")
+local ReactAction = popupButton("REACTIONS", "Choose any reaction")
+
+new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(14, 204),
+    Size = UDim2.new(1, -28, 0, 13),
+    Font = Enum.Font.GothamBold,
+    Text = "All reactions",
+    TextColor3 = Color3.fromRGB(150, 150, 158),
+    TextSize = 8,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 303,
+}, Popup)
 
 local ReactionPanel = new("Frame", {
-    Visible = false,
-    BackgroundColor3 = Color3.fromRGB(22, 22, 25),
+    Visible = true,
+    BackgroundColor3 = Color3.fromRGB(25, 25, 29),
     BorderSizePixel = 0,
-    Position = UDim2.fromOffset(10, 154),
-    Size = UDim2.new(1, -20, 0, 54),
+    Position = UDim2.fromOffset(12, 219),
+    Size = UDim2.new(1, -24, 0, 68),
     ZIndex = 306,
 }, Popup)
 addCorner(ReactionPanel, 11)
@@ -2397,22 +2534,24 @@ addCorner(ReactionPanel, 11)
 local reactionScroll = new("ScrollingFrame", {
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
-    Size = UDim2.new(1, 0, 1, 0),
+    Position = UDim2.fromOffset(5, 4),
+    Size = UDim2.new(1, -10, 1, -8),
     CanvasSize = UDim2.fromOffset(0, 0),
     ScrollingDirection = Enum.ScrollingDirection.X,
     ScrollBarThickness = 0,
     ZIndex = 307,
 }, ReactionPanel)
 
-new("UIListLayout", {
+new("UIGridLayout", {
+    CellSize = UDim2.fromOffset(37, 28),
+    CellPadding = UDim2.fromOffset(1, 2),
     FillDirection = Enum.FillDirection.Horizontal,
-    VerticalAlignment = Enum.VerticalAlignment.Center,
-    Padding = UDim.new(0, 2),
+    FillDirectionMaxCells = 7,
     SortOrder = Enum.SortOrder.LayoutOrder,
 }, reactionScroll)
 
 for i, reaction in ipairs(REACTIONS) do
-    local b = makeReactionButton(reactionScroll, reaction, UDim2.fromOffset(34, 45), 308)
+    local b = makeReactionButton(reactionScroll, reaction, UDim2.fromOffset(37, 28), 308)
     b.LayoutOrder = i
     b.MouseButton1Click:Connect(function()
         if activePopupMessage and toggleMyReaction(activePopupMessage.key, reaction) then
@@ -2422,9 +2561,9 @@ for i, reaction in ipairs(REACTIONS) do
 end
 
 task.defer(function()
-    local layout = reactionScroll:FindFirstChildOfClass("UIListLayout")
+    local layout = reactionScroll:FindFirstChildOfClass("UIGridLayout")
     if layout then
-        reactionScroll.CanvasSize = UDim2.fromOffset(layout.AbsoluteContentSize.X + 8, 0)
+        reactionScroll.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y + 8)
     end
 end)
 
@@ -2552,7 +2691,7 @@ end
 
 closePopup = function()
     PopupShade.Visible = false
-    ReactionPanel.Visible = false
+    ReactionPanel.Visible = true
     QuickReactionBar.Visible = true
     PopupButtons.Visible = true
     activePopupMessage = nil
@@ -2592,8 +2731,8 @@ CopyAction.MouseButton1Click:Connect(function()
 end)
 
 ReactAction.MouseButton1Click:Connect(function()
-    ReactionPanel.Visible = not ReactionPanel.Visible
-    QuickReactionBar.Visible = not ReactionPanel.Visible
+    ReactionPanel.Visible = true
+    QuickReactionBar.Visible = true
     if activePopupMessage then
         if activePopupIsDM then
             task.spawn(function() fetchDMReactions(activePopupMessage.key) end)
@@ -2610,7 +2749,7 @@ openMessagePopup = function(message, isDM)
     PopupPreview.Text = message.type == "sticker"
         and "Sticker"
         or tostring(message.message or "")
-    ReactionPanel.Visible = false
+    ReactionPanel.Visible = true
     QuickReactionBar.Visible = true
     PopupButtons.Visible = true
     PopupShade.Visible = true
@@ -2791,8 +2930,8 @@ renderMessage = function(message)
         }, holder)
 
         -- Compact Discord-like wave prompt underneath the announcement.
-        -- It is intentionally just a visual prompt for now; normal chat send
-        -- remains completely independent from it.
+        -- Clicking it sends a real Main Chat message using the joined player's
+        -- display name.
         local wave = new("TextButton", {
             BackgroundColor3 = Color3.fromRGB(28, 28, 31),
             BorderSizePixel = 0,
@@ -2817,6 +2956,20 @@ renderMessage = function(message)
         end)
         wave.MouseButton1Up:Connect(function()
             tween(wave, {BackgroundColor3 = Color3.fromRGB(28, 28, 31)}, 0.10)
+        end)
+
+        wave.MouseButton1Click:Connect(function()
+            -- Always return to Main Chat for this action. If the user is in a DM
+            -- tab, switch first so the greeting is sent to the server chat.
+            if activeTab ~= "server" then
+                switchTab("server")
+            end
+
+            local greetingName = tostring(message.displayName or message.username or "Player")
+            Input.Text = "Hi! " .. greetingName .. ", Welcome Back!"
+            if sendMessage then
+                sendMessage()
+            end
         end)
 
         local card = {
@@ -3155,7 +3308,7 @@ renderMessage = function(message)
                 and not holdTriggered
                 and os.clock() - pressStart >= 0.40 then
                 holdTriggered = true
-                openMessagePopup(message)
+                openMessagePopup(message, false)
             end
         end)
     end)
@@ -3180,7 +3333,7 @@ renderMessage = function(message)
     end)
 end
 
-local function sendMessage()
+sendMessage = function()
     if activeTab == "dm" then
         return sendDM()
     end
