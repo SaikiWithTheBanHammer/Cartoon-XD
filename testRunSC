@@ -500,6 +500,9 @@ local DMSearch = new("TextBox", {
 }, DMRoot)
 addCorner(DMSearch, 999)
 addStroke(DMSearch, Color3.fromRGB(30, 30, 33), 0.1, 1)
+-- Force a genuinely blank DM search field even if the executor/Roblox TextBox default is restored during construction.
+DMSearch.Text = ""
+DMSearch.PlaceholderText = ""
 
 local DMHome = new("Frame", {
     Name = "DMHome",
@@ -630,6 +633,9 @@ local Input = new("TextBox", {
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Center,
 }, Composer)
+-- Force the shared composer to start blank; DM mode never uses a default "TextBox" value.
+Input.Text = ""
+Input.PlaceholderText = ""
 
 -- Sticker button opens the sticker browser.
 local StickerOpen = new("TextButton", {
@@ -1530,11 +1536,10 @@ local function makeDMRow(parent, candidate, compact)
             if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
         end
         Input.PlaceholderText=""
-        -- Create/restore the lightweight thread metadata before reading it.
-        -- This lets an existing DM conversation load immediately even when
-        -- the user has not sent a new message in that conversation.
+        -- Opening a conversation must only READ existing messages.
+        -- Do not create/update thread metadata here: an existing conversation
+        -- must load even when the current player has not sent anything new.
         if not DMAuth.idToken then dmSignIn() end
-        ensureDMThread()
         loadDMMessages()
     end)
     return row
@@ -1776,22 +1781,79 @@ local function renderDMMessage(msg)
 end
 
 loadDMMessages = function()
-    if not activeDMUser or not DMAuth.idToken then return end
+    if not activeDMUser then return end
+    if not DMAuth.idToken then dmSignIn() end
+    if not DMAuth.idToken then return end
+
     local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
-    local extra='orderBy="$key"&limitToLast=30'
-    local ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
+    local messagesPath = "/dmThreads/" .. urlEncode(thread) .. "/messages"
+    local extra = 'limitToLast=30'
+
+    -- Read the messages directly. Opening a DM must never depend on the
+    -- thread metadata write that is only needed when sending a new message.
+    local ok, data = requestJSON("GET", dmAuthURL(messagesPath, DMAuth.idToken, extra))
     if not ok and dmRefreshAuthToken() then
-        ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
+        ok, data = requestJSON("GET", dmAuthURL(messagesPath, DMAuth.idToken, extra))
     end
-    if not ok then return end
-    local list={}
-    for key,msg in pairs(data or {}) do
-        if type(msg)=="table" then msg.key=key; table.insert(list,msg) end
+
+    -- Fallback for older/legacy thread layouts or query handling: read the
+    -- thread itself and extract its messages node. This is only used when the
+    -- optimized messages query fails, so normal DM loading stays lightweight.
+    if not ok or type(data) ~= "table" then
+        local rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
+        if not rootOK and dmRefreshAuthToken() then
+            rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
+        end
+        if rootOK and type(rootData) == "table" and type(rootData.messages) == "table" then
+            ok, data = true, rootData.messages
+        else
+            return
+        end
     end
-    table.sort(list,function(a,b) return tostring(a.key)<tostring(b.key) end)
+
+    local list = {}
+    for key, msg in pairs(data or {}) do
+        if type(msg) == "table" then
+            local copy = {}
+            for field, value in pairs(msg) do copy[field] = value end
+            copy.key = tostring(key)
+            table.insert(list, copy)
+        end
+    end
+
+    -- If the optimized query returned an empty object, perform one direct
+    -- thread read as a safety net for existing/legacy conversations. This is
+    -- especially important for History entries created by an older script.
+    if #list == 0 then
+        local rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
+        if not rootOK and dmRefreshAuthToken() then
+            rootOK, rootData = requestJSON("GET", dmAuthURL("/dmThreads/" .. urlEncode(thread), DMAuth.idToken))
+        end
+        if rootOK and type(rootData) == "table" and type(rootData.messages) == "table" then
+            for key, msg in pairs(rootData.messages) do
+                if type(msg) == "table" then
+                    local copy = {}
+                    for field, value in pairs(msg) do copy[field] = value end
+                    copy.key = tostring(key)
+                    table.insert(list, copy)
+                end
+            end
+        end
+    end
+
+    -- Firebase's key ordering is normally chronological because messages use
+    -- timestamp-based keys, but sorting by timestamp first also handles older
+    -- message formats safely.
+    table.sort(list, function(a, b)
+        local at = tonumber(a.timestamp) or 0
+        local bt = tonumber(b.timestamp) or 0
+        if at == bt then return tostring(a.key) < tostring(b.key) end
+        return at < bt
+    end)
+    while #list > 30 do table.remove(list, 1) end
 
     -- Opening an empty conversation must never create a History entry.
-    -- Once at least one real message/sticker exists, persist this person locally.
+    -- Once real messages/stickers exist, persist this person locally.
     if #list > 0 then
         local hasIncoming = false
         local latestAt = 0
@@ -1806,13 +1868,10 @@ loadDMMessages = function()
         rememberDMUser(activeDMUser, hasIncoming, latestAt)
     end
 
-    for _,msg in ipairs(list) do renderDMMessage(msg) end
+    for _, msg in ipairs(list) do renderDMMessage(msg) end
 
-    -- A DM conversation always keeps only the newest 30 visible messages.
-    -- This is count-based, not time-based: it does not matter whether they
-    -- were sent seconds, days, or months ago.
     local visible = {}
-    for _,child in ipairs(DMConversation:GetChildren()) do
+    for _, child in ipairs(DMConversation:GetChildren()) do
         if child:IsA("Frame") and child ~= DMConversation:FindFirstChildOfClass("UIListLayout") then
             table.insert(visible, child)
         end
@@ -2011,7 +2070,10 @@ local function switchTab(tab)
     TabSwitch.Text=dm and "CHAT" or "DM"
     if dm then
         clearReply()
+        DMSearch.Text = ""
+        DMSearch.PlaceholderText = ""
         Input.Text=""
+        Input.PlaceholderText = ""
         Composer.Visible=activeDMUser ~= nil
         StickerOpen.Visible=activeDMUser ~= nil
         Input.PlaceholderText=""
@@ -2032,6 +2094,16 @@ local function switchTab(tab)
 end
 
 DMBack.MouseButton1Click:Connect(closeDMConversation)
+-- Final startup guard: some executors briefly restore TextBox's default text during
+-- GUI creation. Clear the DM fields again on the next task step so the lists are
+-- immediately visible and never appear broken to a first-time user.
+task.defer(function()
+    DMSearch.Text = ""
+    DMSearch.PlaceholderText = ""
+    Input.Text = ""
+    if activeTab == "dm" then Input.PlaceholderText = "" end
+end)
+
 DMSearch:GetPropertyChangedSignal("Text"):Connect(function() if activeTab=="dm" and not activeDMUser then renderDMResults() end end)
 Players.PlayerAdded:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
 Players.PlayerRemoving:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
