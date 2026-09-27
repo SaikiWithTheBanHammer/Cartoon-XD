@@ -3211,39 +3211,56 @@ end
 -- -----------------------------------------------------------------------------
 -- Server chat
 -- -----------------------------------------------------------------------------
+-- The old receiver used one Firebase push-key as a moving cutoff. That is
+-- fragile around startup/polling races: a message written while the initial
+-- snapshot was being taken could become the new cutoff and then be skipped.
+-- Instead, take a startup snapshot of existing messages and thereafter render
+-- every unseen message from the rolling window. The join timestamp keeps the
+-- startup snapshot from swallowing a message that was actually sent after we
+-- joined.
+local serverJoinTimestamp = DateTime.now().UnixTimestampMillis
 cutoffKey = nil
 seen = {}
 
-local function getLatestKey()
+local function primeServerMessageSnapshot()
     local ok, data = requestJSON(
         "GET",
         authURL(
             "/servers/" .. urlEncode(game.JobId) .. "/messages",
             Auth.idToken,
-            'orderBy="$key"&limitToLast=1'
+            'orderBy="$key"&limitToLast=60'
         )
     )
-    if not ok or type(data) ~= "table" then return nil end
-    for key in pairs(data) do return key end
-    return nil
+    if not ok or type(data) ~= "table" then return false end
+
+    for key, msg in pairs(data) do
+        if type(msg) == "table" then
+            local stamp = tonumber(msg.timestamp) or 0
+            -- Only pre-join messages are suppressed. Anything written after
+            -- this client's join moment remains eligible for the next poll.
+            if stamp <= serverJoinTimestamp then
+                seen[tostring(key)] = true
+            end
+        end
+    end
+    return true
 end
 
 local function getNewMessages()
-    local extra = 'orderBy="$key"&limitToLast=60'
-    if cutoffKey then
-        extra = 'orderBy="$key"&startAt="' .. urlEncode(cutoffKey) .. '"&limitToFirst=60'
-    end
-
     local ok, data = requestJSON(
         "GET",
-        authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken, extra)
+        authURL(
+            "/servers/" .. urlEncode(game.JobId) .. "/messages",
+            Auth.idToken,
+            'orderBy="$key"&limitToLast=60'
+        )
     )
     if not ok or type(data) ~= "table" then return end
 
     local list = {}
     for key, msg in pairs(data) do
         if type(msg) == "table" then
-            msg.key = key
+            msg.key = tostring(key)
             table.insert(list, msg)
         end
     end
@@ -3253,13 +3270,14 @@ local function getNewMessages()
     end)
 
     for _, msg in ipairs(list) do
-        -- startAt is inclusive in Firebase REST, so explicitly discard the
-        -- snapshot key itself. This prevents the last pre-join message from
-        -- appearing as if it was sent by someone after we joined.
-        if (not cutoffKey or tostring(msg.key) > tostring(cutoffKey)) and not seen[msg.key] then
-            seen[msg.key] = true
+        local key = tostring(msg.key)
+        local stamp = tonumber(msg.timestamp) or 0
+        -- Render only genuinely new messages. A message written after the
+        -- startup moment is eligible even if its Firebase key is not the one
+        -- immediately following the previous poll.
+        if not seen[key] and stamp > serverJoinTimestamp then
+            seen[key] = true
             renderMessage(msg)
-            cutoffKey = msg.key
         end
     end
 end
@@ -3472,8 +3490,9 @@ end)
 -- Start in Server Chat with the normal composer visible.
 Composer.Visible = true
 
--- Snapshot the newest existing message. Nothing before this point is rendered.
-cutoffKey = getLatestKey()
+-- Snapshot existing messages without rendering them. Anything written after
+-- serverJoinTimestamp will be picked up by the normal polling loop.
+primeServerMessageSnapshot()
 
 -- Load the DM contact pool in the background.
 loadDMCandidates()
