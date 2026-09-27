@@ -1752,7 +1752,7 @@ local function renderDMMessage(msg)
     local replyName = msg.replyToDisplayName or msg.replyDisplayName
     local replyHeight = msg.replyTo and 30 or 0
     local top = msg.replyTo and 35 or 4
-    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 20, 66, 225)
+    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 24, 72, 232)
     local bubbleHeight = math.max(28, math.ceil(top + bodyHeight + 5))
 
     local holder = new("Frame", {
@@ -1763,7 +1763,7 @@ local function renderDMMessage(msg)
     if msg._optimistic then holder:SetAttribute("DMOptimisticKey", msg.key) end
 
     local bubble = new("Frame", {
-        BackgroundColor3=mine and Color3.fromRGB(31,31,34) or Color3.fromRGB(20,20,22),
+        BackgroundColor3=mine and Color3.fromRGB(24,61,53) or Color3.fromRGB(20,20,22),
         BorderSizePixel=0,
         Position=UDim2.new(mine and 1 or 0, mine and -bubbleWidth-3 or 3, 0, 0),
         Size=UDim2.fromOffset(bubbleWidth,bubbleHeight),
@@ -1827,17 +1827,24 @@ local function renderDMMessage(msg)
     else
         new("TextLabel", {
             BackgroundTransparency=1,
-            Position=UDim2.fromOffset(10, top + (mine and 3 or 0)),
-            Size=UDim2.new(1,-20,0,bodyHeight),
+            Position=UDim2.fromOffset(11, top + (mine and 2 or 0)),
+            Size=UDim2.new(1,-22,0,bodyHeight),
             Font=Enum.Font.GothamBold,
             Text=textValue,
-            TextColor3=Color3.fromRGB(232,232,235),
+            TextColor3=Color3.fromRGB(240,242,241),
             TextSize=11,
             TextWrapped=true,
             TextYAlignment=Enum.TextYAlignment.Top,
-            TextXAlignment=Enum.TextXAlignment.Center,
+            TextXAlignment=Enum.TextXAlignment.Left,
             TextTruncate=Enum.TextTruncate.None,
         }, bubble)
+        if mine then
+            new("Frame", {
+                BackgroundColor3=Color3.fromRGB(24,61,53), BorderSizePixel=0,
+                Size=UDim2.fromOffset(8,8), Position=UDim2.new(1,-5,1,-9),
+                Rotation=45, ZIndex=1,
+            }, holder)
+        end
     end
 
     local hitbox = new("TextButton", {
@@ -2760,7 +2767,10 @@ renderMessage = function(message)
 
     -- Keep bubbles content-sized. Long messages become wider + taller;
     -- short messages remain small pills.
-    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 20, 66, 225)
+    -- Self messages use a wider WhatsApp/iPhone-style content area. The
+    -- bubble is still content-sized, but never becomes an awkward tiny pill
+    -- for normal sentences.
+    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 24, 72, 232)
 
     local nameHeight = showName and 12 or 0
     local replyHeight = replyPreview and 32 or 0
@@ -2781,20 +2791,22 @@ renderMessage = function(message)
     }, Scroll)
 
     local avatarSize = 25
-    -- WhatsApp-style alignment: other users stay on the LEFT, our messages
-    -- stay on the RIGHT. The text inside each bubble remains centered separately.
+    -- Incoming messages keep their avatar on the left. Self messages are
+    -- deliberately bubble-only on the right, like WhatsApp/iPhone, with no
+    -- avatar consuming horizontal space.
     local groupGap = 7
-    local groupWidth = bubbleWidth + avatarSize + groupGap
+    local groupWidth = mine and bubbleWidth or (bubbleWidth + avatarSize + groupGap)
     local viewportWidth = math.max(0, Scroll.AbsoluteSize.X)
     local edgePadding = 5
     local groupLeft
     if mine then
-        groupLeft = math.max(0, viewportWidth - groupWidth - edgePadding)
+        groupLeft = math.max(edgePadding, viewportWidth - groupWidth - edgePadding)
     else
         groupLeft = edgePadding
     end
 
     local avatar = new("ImageLabel", {
+        Visible = not mine,
         BackgroundColor3 = Color3.fromRGB(19, 19, 21),
         BorderSizePixel = 0,
         Size = UDim2.fromOffset(avatarSize, avatarSize),
@@ -2812,7 +2824,8 @@ renderMessage = function(message)
     -- geometry and color as every other message received from another user.
     -- Only the sender identity/avatar remains Ultron.
     local bubble = new("Frame", {
-        BackgroundColor3 = mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22),
+        -- Self = muted WhatsApp-green, incoming = the existing charcoal bubble.
+        BackgroundColor3 = mine and Color3.fromRGB(24, 61, 53) or Color3.fromRGB(20, 20, 22),
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(
             mine and groupLeft or groupLeft + avatarSize + groupGap,
@@ -2908,12 +2921,34 @@ renderMessage = function(message)
             end)
         end
     else
+        local selfTextPad = mine and 11 or 10
+        local selfTextY = contentY + (mine and 2 or 0)
         new("TextLabel", {
-            BackgroundTransparency = 1, Position = UDim2.fromOffset(10, contentY + (mine and 3 or 0)),
-            Size = UDim2.new(1, -20, 0, bodyHeight), Font = font, Text = bodyText,
-            TextColor3 = isUltron and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(232, 232, 235), TextSize = textSize, TextWrapped = true, TextTruncate = Enum.TextTruncate.None,
-            TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Top,
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(selfTextPad, selfTextY),
+            Size = UDim2.new(1, -selfTextPad * 2, 0, bodyHeight),
+            Font = font,
+            Text = bodyText,
+            TextColor3 = Color3.fromRGB(240, 242, 241),
+            TextSize = textSize,
+            TextWrapped = true,
+            TextTruncate = Enum.TextTruncate.None,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
         }, bubble)
+
+        -- Small bottom-right tail for self messages. It visually separates
+        -- the sender side without using an image asset.
+        if mine then
+            local tail = new("Frame", {
+                BackgroundColor3 = Color3.fromRGB(24, 61, 53),
+                BorderSizePixel = 0,
+                Size = UDim2.fromOffset(8, 8),
+                Position = UDim2.new(1, -5, 1, -9),
+                Rotation = 45,
+                ZIndex = 1,
+            }, holder)
+        end
     end
 
     local hitbox = new("TextButton", {
@@ -3318,4 +3353,4 @@ applyCleanTheme = function(name,animate)
     if THEMES[name] then currentThemeName=name end
 end
 
-print("[Saiki Rechat v20] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v20.1] Loaded | Server: " .. tostring(game.JobId))
