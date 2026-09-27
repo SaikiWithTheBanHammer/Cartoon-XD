@@ -484,10 +484,23 @@ local DMRoot = new("Frame", {
     Visible = false,
 }, Main)
 
+-- DM home: compact Discord-style directory. The search field is deliberately
+-- blank; the two useful lists stay visible until the user actually searches.
+local DMTitle = new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(4, 0),
+    Size = UDim2.new(1, -8, 0, 17),
+    Font = Enum.Font.GothamBold,
+    Text = "DIRECT MESSAGES",
+    TextColor3 = Color3.fromRGB(232, 232, 237),
+    TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, DMRoot)
+
 local DMSearch = new("TextBox", {
     BackgroundColor3 = Color3.fromRGB(13, 13, 15),
-    Position = UDim2.fromOffset(0, 0),
-    Size = UDim2.new(1, 0, 0, 36),
+    Position = UDim2.fromOffset(31, 21),
+    Size = UDim2.new(1, -31, 0, 32),
     BorderSizePixel = 0,
     ClearTextOnFocus = false,
     Font = Enum.Font.Gotham,
@@ -495,19 +508,28 @@ local DMSearch = new("TextBox", {
     PlaceholderText = "",
     PlaceholderColor3 = Color3.fromRGB(78, 78, 83),
     TextColor3 = Color3.fromRGB(232, 232, 235),
-    TextSize = 10,
+    TextSize = 9,
     TextXAlignment = Enum.TextXAlignment.Left,
 }, DMRoot)
-addCorner(DMSearch, 999)
+addCorner(DMSearch, 10)
 addStroke(DMSearch, Color3.fromRGB(30, 30, 33), 0.1, 1)
--- Force a genuinely blank DM search field even if the executor/Roblox TextBox default is restored during construction.
+new("TextLabel", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(11, 21),
+    Size = UDim2.fromOffset(20, 32),
+    Font = Enum.Font.GothamBold,
+    Text = "⌕",
+    TextColor3 = Color3.fromRGB(105, 105, 112),
+    TextSize = 14,
+    TextXAlignment = Enum.TextXAlignment.Center,
+}, DMRoot)
 DMSearch.Text = ""
 DMSearch.PlaceholderText = ""
 
 local DMHome = new("Frame", {
     Name = "DMHome",
-    Position = UDim2.fromOffset(0, 44),
-    Size = UDim2.new(1, 0, 1, -44),
+    Position = UDim2.fromOffset(0, 59),
+    Size = UDim2.new(1, 0, 1, -59),
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
 }, DMRoot)
@@ -532,20 +554,33 @@ local DMHistoryPanel = new("Frame", {
 addCorner(DMHistoryPanel, 12)
 addStroke(DMHistoryPanel, Color3.fromRGB(28, 28, 32), 0.1, 1)
 
-new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(11, 7), Size = UDim2.new(1, -22, 0, 16),
-    Font = Enum.Font.GothamBold, Text = "SERVER", TextColor3 = Color3.fromRGB(185, 185, 190), TextSize = 8,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, DMServerPanel)
-
-new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(11, 7), Size = UDim2.new(1, -22, 0, 16),
-    Font = Enum.Font.GothamBold, Text = "HISTORY", TextColor3 = Color3.fromRGB(185, 185, 190), TextSize = 8,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, DMHistoryPanel)
+local function makeDMPanelHeader(parent, title, subtitle)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(11, 7),
+        Size = UDim2.new(1, -22, 0, 13),
+        Font = Enum.Font.GothamBold,
+        Text = title,
+        TextColor3 = Color3.fromRGB(218, 218, 224),
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, parent)
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(11, 20),
+        Size = UDim2.new(1, -22, 0, 9),
+        Font = Enum.Font.Gotham,
+        Text = subtitle,
+        TextColor3 = Color3.fromRGB(75, 75, 82),
+        TextSize = 6,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, parent)
+end
+makeDMPanelHeader(DMServerPanel, "IN THIS SERVER", "People you can message right now")
+makeDMPanelHeader(DMHistoryPanel, "CONVERSATIONS", "Your saved private conversations")
 
 local DMServerList = new("ScrollingFrame", {
-    Name = "ServerList", Position = UDim2.fromOffset(6, 28), Size = UDim2.new(1, -12, 1, -34),
+    Name = "ServerList", Position = UDim2.fromOffset(6, 34), Size = UDim2.new(1, -12, 1, -40),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -553,7 +588,7 @@ local DMServerList = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, DMServerList)
 
 local DMHistoryList = new("ScrollingFrame", {
-    Name = "HistoryList", Position = UDim2.fromOffset(6, 28), Size = UDim2.new(1, -12, 1, -34),
+    Name = "HistoryList", Position = UDim2.fromOffset(6, 34), Size = UDim2.new(1, -12, 1, -40),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -561,7 +596,7 @@ local DMHistoryList = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, DMHistoryList)
 
 local DMResults = new("ScrollingFrame", {
-    Name = "SearchResults", Position = UDim2.fromOffset(0, 44), Size = UDim2.new(1, 0, 1, -44),
+    Name = "SearchResults", Position = UDim2.fromOffset(0, 59), Size = UDim2.new(1, 0, 1, -59),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
@@ -572,41 +607,82 @@ new("UIPadding", {PaddingBottom = UDim.new(0, 5)}, DMResults)
 local DMHeader = new("Frame", {
     Name = "ConversationHeader",
     Position = UDim2.fromOffset(0, 0),
-    Size = UDim2.new(1, 0, 0, 34),
+    Size = UDim2.new(1, 0, 0, 42),
     BackgroundColor3 = Color3.fromRGB(13, 13, 15),
     BorderSizePixel = 0,
     Visible = false,
 }, DMRoot)
-addCorner(DMHeader, 10)
+addCorner(DMHeader, 11)
 addStroke(DMHeader, Color3.fromRGB(30, 30, 33), 0.1, 1)
 
 local DMBack = new("TextButton", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(6, 3), Size = UDim2.fromOffset(28, 28),
-    Font = Enum.Font.GothamBold, Text = "<", TextColor3 = Color3.fromRGB(170, 170, 175), TextSize = 14, AutoButtonColor = false,
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(5, 5), Size = UDim2.fromOffset(30, 32),
+    Font = Enum.Font.GothamBold, Text = "‹", TextColor3 = Color3.fromRGB(185, 185, 190), TextSize = 20, AutoButtonColor = false,
 }, DMHeader)
 
+local DMHeaderAvatar = new("ImageLabel", {
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(35, 7), Size = UDim2.fromOffset(28, 28),
+    Image = "", ScaleType = Enum.ScaleType.Crop,
+}, DMHeader)
+addCorner(DMHeaderAvatar, 999)
+
+local DMStatusDot = new("Frame", {
+    AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromOffset(57, 34), Size = UDim2.fromOffset(8, 8),
+    BackgroundColor3 = Color3.fromRGB(75, 75, 82), BorderSizePixel = 0, ZIndex = 3,
+}, DMHeader)
+addCorner(DMStatusDot, 999)
+
 local DMTarget = new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 4), Size = UDim2.new(1, -46, 0, 13),
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(70, 5), Size = UDim2.new(1, -78, 0, 15),
     Font = Enum.Font.GothamBold, Text = "Direct Message", TextColor3 = Color3.fromRGB(230, 230, 235), TextSize = 10,
     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 }, DMHeader)
 
 local DMTargetUser = new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 17), Size = UDim2.new(1, -46, 0, 10),
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(70, 20), Size = UDim2.new(1, -78, 0, 10),
     Font = Enum.Font.Gotham, Text = "", TextColor3 = Color3.fromRGB(95, 95, 100), TextSize = 7,
     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 }, DMHeader)
 
 local DMConversation = new("ScrollingFrame", {
     Name = "Conversation",
-    Position = UDim2.fromOffset(0, 41),
-    Size = UDim2.new(1, 0, 1, -41),
+    Position = UDim2.fromOffset(0, 49),
+    Size = UDim2.new(1, 0, 1, -49),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y, Visible = false,
 }, DMRoot)
 new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center}, DMConversation)
-new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 7)}, DMConversation)
+new("UIPadding", {PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 7)}, DMConversation)
+
+-- Existing DM history is loaded only when the user explicitly asks for it.
+-- This keeps opening a History row instant while giving a clear, obvious
+-- recovery path when the conversation needs to be fetched from Firebase.
+local DMLoadMessagesOverlay = new("Frame", {
+    Name = "LoadMessagesOverlay",
+    Position = UDim2.fromOffset(0, 49),
+    Size = UDim2.new(1, 0, 1, -49),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 20,
+}, DMRoot)
+
+local DMLoadMessagesButton = new("TextButton", {
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(132, 38),
+    BackgroundColor3 = Color3.fromRGB(22, 22, 25),
+    BorderSizePixel = 0,
+    Font = Enum.Font.GothamBold,
+    Text = "Load Messages",
+    TextColor3 = Color3.fromRGB(232, 232, 235),
+    TextSize = 10,
+    AutoButtonColor = false,
+    ZIndex = 21,
+}, DMLoadMessagesOverlay)
+addCorner(DMLoadMessagesButton, 999)
+addStroke(DMLoadMessagesButton, Color3.fromRGB(42, 42, 47), 0.05, 1)
 
 -- Composer.
 local Composer = new("Frame", {
@@ -1470,6 +1546,7 @@ loadDMHistory()
 task.spawn(syncDMIncomingHistory)
 
 local ensureDMThread
+local dmLoadRequested = false
 
 local function addDMCandidate(map, userId, username, displayName, source)
     userId = tonumber(userId)
@@ -1491,56 +1568,112 @@ local function clearList(container)
 end
 
 local function makeDMRow(parent, candidate, compact)
+    local rowHeight = compact and 50 or 58
     local row = new("TextButton", {
-        BackgroundColor3 = Color3.fromRGB(15, 15, 17), BorderSizePixel = 0,
-        Size = UDim2.new(1, 0, 0, compact and 39 or 44), Font = Enum.Font.Gotham, Text = "", AutoButtonColor = false,
+        BackgroundColor3 = Color3.fromRGB(15, 15, 17),
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, rowHeight),
+        Font = Enum.Font.Gotham,
+        Text = "",
+        AutoButtonColor = false,
     }, parent)
-    addCorner(row, 9)
-    local avatarSize = compact and 29 or 32
+    addCorner(row, 10)
+    addStroke(row, Color3.fromRGB(25, 25, 29), 0.1, 1)
+
+    local avatarSize = compact and 34 or 40
     local avatar = new("ImageLabel", {
-        BackgroundTransparency = 1, Position = UDim2.fromOffset(5, math.floor((row.Size.Y.Offset-avatarSize)/2)),
-        Size = UDim2.fromOffset(avatarSize, avatarSize), Image=getAvatar(candidate.Id), ScaleType=Enum.ScaleType.Crop,
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(7, math.floor((rowHeight - avatarSize) / 2)),
+        Size = UDim2.fromOffset(avatarSize, avatarSize),
+        Image = getAvatar(candidate.Id),
+        ScaleType = Enum.ScaleType.Crop,
     }, row)
-    addCorner(avatar, avatarSize/2)
-    new("TextLabel", {
-        BackgroundTransparency = 1, Position = UDim2.fromOffset(41, compact and 5 or 6), Size = UDim2.new(1,-46,0,13),
-        Font = Enum.Font.GothamBold, Text = candidate.DisplayName, TextColor3 = Color3.fromRGB(225,225,230), TextSize = compact and 8 or 9,
-        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+    addCorner(avatar, 999)
+
+    local online = false
+    for _, player in ipairs(Players:GetPlayers()) do
+        if tonumber(player.UserId) == tonumber(candidate.Id) then online = true break end
+    end
+    local dot = new("Frame", {
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.fromOffset(avatarSize + 11, math.floor((rowHeight - avatarSize) / 2) + avatarSize + 1),
+        Size = UDim2.fromOffset(9, 9),
+        BackgroundColor3 = online and Color3.fromRGB(55, 205, 105) or Color3.fromRGB(72, 72, 79),
+        BorderSizePixel = 0,
+        ZIndex = 4,
     }, row)
+    addCorner(dot, 999)
+
     new("TextLabel", {
-        BackgroundTransparency = 1, Position = UDim2.fromOffset(41, compact and 19 or 22), Size = UDim2.new(1,-46,0,10),
-        Font = Enum.Font.Gotham, Text = "@"..candidate.Username, TextColor3 = Color3.fromRGB(92,92,98), TextSize = 7,
-        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(50, compact and 8 or 9),
+        Size = UDim2.new(1, -86, 0, 15),
+        Font = Enum.Font.GothamBold,
+        Text = tostring(candidate.DisplayName or "Unknown"),
+        TextColor3 = Color3.fromRGB(228, 228, 233),
+        TextSize = compact and 8 or 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(50, compact and 23 or 25),
+        Size = UDim2.new(1, -86, 0, 11),
+        Font = Enum.Font.Gotham,
+        Text = "@" .. tostring(candidate.Username or ""),
+        TextColor3 = Color3.fromRGB(92, 92, 98),
+        TextSize = 7,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    local statusText = online and "Online" or "Offline"
+    if candidate.HasIncoming == true then statusText = "New message • " .. statusText end
+    new("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 50, 1, -17),
+        Size = UDim2.new(1, -58, 0, 10),
+        Font = Enum.Font.Gotham,
+        Text = statusText,
+        TextColor3 = candidate.HasIncoming == true and Color3.fromRGB(70, 195, 115) or Color3.fromRGB(68, 68, 75),
+        TextSize = 6,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
 
     if candidate.HasIncoming == true then
-        local incomingDot = new("Frame", {
-            Name = "IncomingDMIndicator",
+        local badge = new("Frame", {
             AnchorPoint = Vector2.new(1, 0.5),
-            Position = UDim2.new(1, -7, 0.5, 0),
-            Size = UDim2.fromOffset(8, 8),
+            Position = UDim2.new(1, -8, 0.5, 0),
+            Size = UDim2.fromOffset(7, 7),
             BackgroundColor3 = Color3.fromRGB(55, 205, 105),
             BorderSizePixel = 0,
         }, row)
-        addCorner(incomingDot, 999)
+        addCorner(badge, 999)
     end
 
     row.MouseButton1Click:Connect(function()
         activeDMUser = candidate
         DMSearch.Visible=false; DMHome.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
         DMTarget.Text=candidate.DisplayName; DMTargetUser.Text="@"..candidate.Username
+        DMHeaderAvatar.Image = getAvatar(candidate.Id)
+        local isOnline = false
+        for _, player in ipairs(Players:GetPlayers()) do
+            if tonumber(player.UserId) == tonumber(candidate.Id) then isOnline=true break end
+        end
+        DMStatusDot.BackgroundColor3 = isOnline and Color3.fromRGB(55,205,105) or Color3.fromRGB(72,72,79)
         Composer.Visible=true
         StickerOpen.Visible=true
         dmSeen={}
         for _, child in ipairs(DMConversation:GetChildren()) do
             if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
         end
+        Input.Text=""
         Input.PlaceholderText=""
-        -- Opening a conversation must only READ existing messages.
-        -- Do not create/update thread metadata here: an existing conversation
-        -- must load even when the current player has not sent anything new.
+        dmLoadRequested = false
+        DMLoadMessagesOverlay.Visible = true
         if not DMAuth.idToken then dmSignIn() end
-        loadDMMessages()
     end)
     return row
 end
@@ -1807,7 +1940,7 @@ loadDMMessages = function()
         if rootOK and type(rootData) == "table" and type(rootData.messages) == "table" then
             ok, data = true, rootData.messages
         else
-            return
+            return false
         end
     end
 
@@ -1882,7 +2015,23 @@ loadDMMessages = function()
         if key then dmSeen[key] = nil end
         oldest:Destroy()
     end
+
+    dmLoadRequested = true
+    DMLoadMessagesOverlay.Visible = false
+    return true
 end
+
+DMLoadMessagesButton.MouseButton1Click:Connect(function()
+    if not activeDMUser then return end
+    dmLoadRequested = true
+    DMLoadMessagesButton.Text = "Loading..."
+    local ok = loadDMMessages()
+    if not ok and activeDMUser then
+        dmLoadRequested = false
+        DMLoadMessagesButton.Text = "Load Messages"
+        DMLoadMessagesOverlay.Visible = true
+    end
+end)
 
 ensureDMThread = function()
     if not activeDMUser then return false end
@@ -2040,6 +2189,7 @@ sendDM = function(stickerUrl, stickerAsset)
 
     -- Render only after Firebase accepted the write. This guarantees the card
     -- represents a real DM message instead of a local-only fake send.
+    dmLoadRequested = true
     dmSeen = {}
     for _, child in ipairs(DMConversation:GetChildren()) do
         if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
@@ -2053,6 +2203,9 @@ end
 local function closeDMConversation()
     activeDMUser=nil
     DMHeader.Visible=false; DMConversation.Visible=false; DMSearch.Visible=true; DMHome.Visible=true; DMResults.Visible=false
+    DMLoadMessagesOverlay.Visible=false
+    DMLoadMessagesButton.Text="Load Messages"
+    dmLoadRequested=false
     Composer.Visible=false
     StickerOpen.Visible=false
     StickerPanel.Visible=false
@@ -2080,6 +2233,9 @@ local function switchTab(tab)
         if not activeDMUser then
             DMHeader.Visible=false
             DMConversation.Visible=false
+            DMLoadMessagesOverlay.Visible=false
+            DMLoadMessagesButton.Text="Load Messages"
+            dmLoadRequested=false
             DMSearch.Visible=true
             DMHome.Visible=true
             DMResults.Visible=false
@@ -3254,7 +3410,7 @@ task.spawn(function()
             if DMAuth.idToken then
                 syncDMIncomingHistory()
             end
-            if activeDMUser and DMAuth.idToken then
+            if activeDMUser and DMAuth.idToken and dmLoadRequested then
                 loadDMMessages()
             end
         elseif Auth.idToken then
