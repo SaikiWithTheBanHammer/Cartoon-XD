@@ -1736,24 +1736,27 @@ local function renderDMMessage(msg)
     local mine = tonumber(msg.senderId) == tonumber(LocalPlayer.UserId)
     local isSticker = tostring(msg.type or "text") == "sticker"
     local textValue = tostring(msg.message or (isSticker and "Sticker") or "")
-    local bodyWidth = isSticker and 118 or math.clamp(
-        TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(10000, 1000)).X,
-        46, 205
-    )
+    local dmTextPad = 11
+    local dmLineHeight = 13
+    local bodyWidth
     local bodyHeight
     if isSticker then
+        bodyWidth = 118
         bodyHeight = 118
     else
-        local wrap = TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(bodyWidth, 10000))
-        bodyHeight = math.max(13, math.ceil(wrap.Y) + 12)
+        local unwrapped = TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(10000, 1000))
+        bodyWidth = math.clamp(unwrapped.X + dmTextPad * 2, 46 + dmTextPad * 2, 205 + dmTextPad * 2)
+        local actualWidth = math.max(1, bodyWidth - dmTextPad * 2)
+        local wrap = TextService:GetTextSize(textValue, 11, Enum.Font.GothamBold, Vector2.new(actualWidth, 10000))
+        bodyHeight = math.max(dmLineHeight, math.ceil(wrap.Y))
     end
 
     local replyText = msg.replyToText or msg.replyText
     local replyName = msg.replyToDisplayName or msg.replyDisplayName
     local replyHeight = msg.replyTo and 30 or 0
-    local top = msg.replyTo and 35 or 4
-    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 24, 72, 232)
-    local bubbleHeight = math.max(28, math.ceil(top + bodyHeight + 5))
+    local top = msg.replyTo and 35 or 6
+    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth, 72, 232)
+    local bubbleHeight = math.max(28, math.ceil(top + bodyHeight + 6))
 
     local holder = new("Frame", {
         BackgroundTransparency=1,
@@ -1827,8 +1830,8 @@ local function renderDMMessage(msg)
     else
         new("TextLabel", {
             BackgroundTransparency=1,
-            Position=UDim2.fromOffset(11, top + (mine and 2 or 0)),
-            Size=UDim2.new(1,-22,0,bodyHeight),
+            Position=UDim2.fromOffset(dmTextPad, top + (mine and 2 or 1)),
+            Size=UDim2.new(1,-dmTextPad*2,0,bodyHeight),
             Font=Enum.Font.GothamBold,
             Text=textValue,
             TextColor3=Color3.fromRGB(240,242,241),
@@ -2729,6 +2732,11 @@ renderMessage = function(message)
     local maxBodyWidth = 205
     local minBodyWidth = 46
 
+    -- NEW iPhone/WhatsApp-style text geometry. The width used for measuring
+    -- the wrapped text is exactly the width later given to the TextLabel.
+    -- No large vertical fudge factor is used.
+    local horizontalTextPad = 11
+    local textLineHeight = 13
     local bodyWidth, bodyHeight
     if isSticker then
         bodyWidth = 118
@@ -2737,14 +2745,16 @@ renderMessage = function(message)
         local unwrapped = TextService:GetTextSize(
             bodyText, textSize, font, Vector2.new(10000, 1000)
         )
-        bodyWidth = math.clamp(unwrapped.X, minBodyWidth, maxBodyWidth)
-        local wrapped = TextService:GetTextSize(
-            bodyText, textSize, font, Vector2.new(bodyWidth, 10000)
+        bodyWidth = math.clamp(
+            unwrapped.X + horizontalTextPad * 2,
+            minBodyWidth + horizontalTextPad * 2,
+            maxBodyWidth + horizontalTextPad * 2
         )
-        local lineHeight = 13
-        -- Give the TextLabel extra vertical room. Roblox can round the measured
-        -- wrapped height down, which can clip the final word/line of a message.
-        bodyHeight = math.max(lineHeight, math.ceil(wrapped.Y) + 12)
+        local actualTextWidth = math.max(1, bodyWidth - horizontalTextPad * 2)
+        local wrapped = TextService:GetTextSize(
+            bodyText, textSize, font, Vector2.new(actualTextWidth, 10000)
+        )
+        bodyHeight = math.max(textLineHeight, math.ceil(wrapped.Y))
     end
 
     -- Reply target. Prefer the rendered target; if it has already scrolled
@@ -2772,14 +2782,17 @@ renderMessage = function(message)
     -- for normal sentences.
     local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 24, 72, 232)
 
-    local nameHeight = showName and 12 or 0
+    -- Fixed vertical geometry. Incoming messages have a sender row; self
+    -- messages get a slightly larger top offset so their visible glyphs sit
+    -- at the same visual baseline as WhatsApp/iPhone self messages.
+    local nameHeight = showName and 10 or 0
     local replyHeight = replyPreview and 32 or 0
-    local topPad = showName and 3 or 0
-    local bodyTop = topPad + nameHeight + (replyPreview and 3 or 2) + replyHeight
-    local bubbleHeight = math.max(
-        28,
-        math.ceil(bodyTop + bodyHeight + 6)
-    )
+    local topPad = showName and 3 or 6
+    local nameGap = showName and 2 or 0
+    local replyGap = replyPreview and 3 or 0
+    local bottomPad = 6
+    local bodyTop = topPad + nameHeight + nameGap + replyGap + replyHeight
+    local bubbleHeight = math.max(28, math.ceil(bodyTop + bodyHeight + bottomPad))
 
     local reactionExtra = 0
     local holderHeight = bubbleHeight + reactionExtra + 3
@@ -2841,7 +2854,8 @@ renderMessage = function(message)
     local bubbleRadius = bubbleHeight <= 34 and math.floor(bubbleHeight / 2) or 12
     addCorner(bubble, bubbleRadius)
 
-    local contentY = 4
+    -- This Y value is shared by the height calculation above.
+    local contentY = showName and 3 or 6
 
     if showName then
         new("TextLabel", {
@@ -2855,7 +2869,7 @@ renderMessage = function(message)
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
         }, bubble)
-        contentY = 14
+        contentY = 15
     end
 
     if replyPreview then
@@ -2921,8 +2935,10 @@ renderMessage = function(message)
             end)
         end
     else
-        local selfTextPad = mine and 11 or 10
-        local selfTextY = contentY + (mine and 2 or 0)
+        -- The visible glyphs in Gotham sit slightly above the mathematical
+        -- TextLabel top. Lower self text by 2px and incoming text by 1px.
+        local selfTextPad = horizontalTextPad
+        local selfTextY = contentY + (mine and 2 or 1)
         new("TextLabel", {
             BackgroundTransparency = 1,
             Position = UDim2.fromOffset(selfTextPad, selfTextY),
@@ -3353,4 +3369,4 @@ applyCleanTheme = function(name,animate)
     if THEMES[name] then currentThemeName=name end
 end
 
-print("[Saiki Rechat v20.1] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v20.2] Loaded | Server: " .. tostring(game.JobId))
