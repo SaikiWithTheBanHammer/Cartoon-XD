@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v17.1
+    SAIKI RECHAT v15
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -310,8 +310,6 @@ local function addStroke(parent, color, transparency, thickness)
     }, parent)
 end
 
-local Main
-
 local function tween(object, properties, duration)
     TweenService:Create(
         object,
@@ -319,162 +317,6 @@ local function tween(object, properties, duration)
         properties
     ):Play()
 end
-
-
--- -----------------------------------------------------------------------------
--- Theme system
--- -----------------------------------------------------------------------------
-local THEMES = {
-    Midnight = {
-        Background = Color3.fromRGB(10, 10, 12), Surface = Color3.fromRGB(16, 16, 19),
-        Surface2 = Color3.fromRGB(20, 20, 23), BubbleMine = Color3.fromRGB(31, 31, 34),
-        BubbleOther = Color3.fromRGB(20, 20, 22), Text = Color3.fromRGB(232, 232, 235),
-        Muted = Color3.fromRGB(155, 155, 162), Border = Color3.fromRGB(42, 42, 45),
-        Accent = Color3.fromRGB(210, 60, 80),
-    },
-    Ultron = {
-        Background = Color3.fromRGB(7, 5, 6), Surface = Color3.fromRGB(16, 11, 13),
-        Surface2 = Color3.fromRGB(25, 17, 19), BubbleMine = Color3.fromRGB(42, 25, 29),
-        BubbleOther = Color3.fromRGB(25, 19, 21), Text = Color3.fromRGB(245, 239, 241),
-        Muted = Color3.fromRGB(175, 145, 151), Border = Color3.fromRGB(72, 39, 45),
-        Accent = Color3.fromRGB(220, 55, 75),
-    },
-    SoftcorePink = {
-        Background = Color3.fromRGB(255, 247, 251), Surface = Color3.fromRGB(255, 255, 255),
-        Surface2 = Color3.fromRGB(255, 240, 246), BubbleMine = Color3.fromRGB(255, 232, 241),
-        BubbleOther = Color3.fromRGB(255, 240, 246), Text = Color3.fromRGB(74, 59, 66),
-        Muted = Color3.fromRGB(155, 135, 144), Border = Color3.fromRGB(245, 220, 231),
-        Accent = Color3.fromRGB(232, 137, 170),
-    },
-    LavenderDream = {
-        Background = Color3.fromRGB(249, 247, 255), Surface = Color3.fromRGB(255, 255, 255),
-        Surface2 = Color3.fromRGB(243, 238, 255), BubbleMine = Color3.fromRGB(235, 226, 255),
-        BubbleOther = Color3.fromRGB(244, 240, 255), Text = Color3.fromRGB(67, 60, 82),
-        Muted = Color3.fromRGB(137, 128, 155), Border = Color3.fromRGB(224, 215, 244),
-        Accent = Color3.fromRGB(158, 132, 220),
-    },
-    CloudBlue = {
-        Background = Color3.fromRGB(246, 251, 255), Surface = Color3.fromRGB(255, 255, 255),
-        Surface2 = Color3.fromRGB(234, 245, 255), BubbleMine = Color3.fromRGB(222, 239, 255),
-        BubbleOther = Color3.fromRGB(237, 247, 255), Text = Color3.fromRGB(54, 68, 82),
-        Muted = Color3.fromRGB(125, 143, 160), Border = Color3.fromRGB(211, 230, 247),
-        Accent = Color3.fromRGB(105, 174, 225),
-    },
-    Pearl = {
-        Background = Color3.fromRGB(247, 247, 248), Surface = Color3.fromRGB(255, 255, 255),
-        Surface2 = Color3.fromRGB(239, 239, 242), BubbleMine = Color3.fromRGB(232, 232, 236),
-        BubbleOther = Color3.fromRGB(242, 242, 245), Text = Color3.fromRGB(54, 54, 60),
-        Muted = Color3.fromRGB(130, 130, 138), Border = Color3.fromRGB(220, 220, 224),
-        Accent = Color3.fromRGB(125, 125, 135),
-    },
-}
-
-local CURRENT_THEME_NAME = "Midnight"
-local CurrentTheme = THEMES[CURRENT_THEME_NAME]
-local ThemeTweens = {}
-
-local function themeRoleFromColor(c, kind)
-    if kind == "background" then
-        for themeName, palette in pairs(THEMES) do
-            for _, role in ipairs({"Background","Surface","Surface2","BubbleMine","BubbleOther"}) do
-                if c == palette[role] then return role end
-            end
-        end
-        local r,g,b = math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5)
-        if r==5 and g==5 and b==6 then return "Background" end
-        if r==31 and g==31 and b==34 then return "BubbleMine" end
-        if r==20 and g==20 and b==22 then return "BubbleOther" end
-        if (r==13 and g==13 and b==15) or (r==16 and g==16 and b==19) then return "Surface" end
-        if (r==10 and g==10 and b==12) or (r==17 and g==17 and b==19) or (r==18 and g==18 and b==20)
-            or (r==20 and g==20 and b==23) or (r==23 and g==23 and b==26) or (r==24 and g==24 and b==27)
-            or (r==27 and g==27 and b==30) or (r==34 and g==34 and b==38) then return "Surface2" end
-    elseif kind == "text" then
-        for themeName, palette in pairs(THEMES) do
-            for _, role in ipairs({"Text","Muted"}) do
-                if c == palette[role] then return role end
-            end
-        end
-        local r,g,b = math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5)
-        if r>=205 and g>=205 and b>=205 then return "Text" end
-        if r<=190 and g<=190 and b<=195 then return "Muted" end
-    elseif kind == "stroke" or kind == "scroll" then
-        return "Border"
-    end
-end
-
-local function themeTagTree(root)
-    for _, obj in ipairs(root:GetDescendants()) do
-        if obj:IsA("GuiObject") then
-            if obj:GetAttribute("SaikiThemeStatic") then
-                -- Theme selector previews keep their own palette and must not be
-                -- recolored when the active application theme changes.
-            else
-                local role = themeRoleFromColor(obj.BackgroundColor3, "background")
-            if role then obj:SetAttribute("SaikiThemeRole", role) end
-            if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
-                role = themeRoleFromColor(obj.TextColor3, "text")
-                if role then obj:SetAttribute("SaikiThemeTextRole", role) end
-            end
-                if obj:IsA("ScrollingFrame") then
-                    obj:SetAttribute("SaikiThemeScrollRole", "Border")
-                end
-            end
-        elseif obj:IsA("UIStroke") then
-            obj:SetAttribute("SaikiThemeStrokeRole", "Border")
-        end
-    end
-end
-
-local function cancelThemeTweens()
-    for _, tw in ipairs(ThemeTweens) do pcall(function() tw:Cancel() end) end
-    table.clear(ThemeTweens)
-end
-
-local function applyTheme(themeName, instant)
-    local theme = THEMES[themeName]
-    if not theme then return end
-    CURRENT_THEME_NAME = themeName
-    CurrentTheme = theme
-    cancelThemeTweens()
-
-    local function setProperty(obj, property, value)
-        if instant then
-            obj[property] = value
-        else
-            local tw = TweenService:Create(obj, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {[property]=value})
-            table.insert(ThemeTweens, tw)
-            tw:Play()
-        end
-    end
-
-    for _, obj in ipairs(Main:GetDescendants()) do
-        if obj:GetAttribute("SaikiThemeStatic") then
-            continue
-        end
-        local role = obj:GetAttribute("SaikiThemeRole")
-        if role and theme[role] and obj:IsA("GuiObject") then setProperty(obj, "BackgroundColor3", theme[role]) end
-        role = obj:GetAttribute("SaikiThemeTextRole")
-        if role and theme[role] and (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox")) then setProperty(obj, "TextColor3", theme[role]) end
-        role = obj:GetAttribute("SaikiThemeStrokeRole")
-        if role and theme[role] and obj:IsA("UIStroke") then setProperty(obj, "Color", theme[role]) end
-        role = obj:GetAttribute("SaikiThemeScrollRole")
-        if role and theme[role] and obj:IsA("ScrollingFrame") then setProperty(obj, "ScrollBarImageColor3", theme[role]) end
-    end
-end
-
-local function saveTheme(themeName)
-    pcall(function()
-        if makefolder and not isfolder(CACHE_FOLDER) then makefolder(CACHE_FOLDER) end
-        if writefile then writefile(CACHE_FOLDER .. "/theme.txt", themeName) end
-    end)
-end
-
-pcall(function()
-    if isfile and readfile and isfile(CACHE_FOLDER .. "/theme.txt") then
-        local saved = readfile(CACHE_FOLDER .. "/theme.txt")
-        if THEMES[saved] then CURRENT_THEME_NAME = saved; CurrentTheme = THEMES[saved] end
-    end
-end)
 
 -- Deterministic Roblox-like name colors. Each display name gets the same
 -- color every time it appears, while different names are distributed across
@@ -522,16 +364,37 @@ local ScreenGui = new("ScreenGui", {
 }, GuiParent)
 
 -- Main window: 425x359, matching the reference aspect ratio.
-Main = new("Frame", {
+
+-- CLEAN THEME SYSTEM: isolated from chat rendering for startup reliability.
+local THEMES = {
+    Midnight={bg=Color3.fromRGB(5,5,6),surface=Color3.fromRGB(13,13,15),surface2=Color3.fromRGB(20,20,23),text=Color3.fromRGB(232,232,235),muted=Color3.fromRGB(155,155,162),border=Color3.fromRGB(42,42,45),accent=Color3.fromRGB(210,60,80)},
+    Ultron={bg=Color3.fromRGB(7,5,6),surface=Color3.fromRGB(16,11,13),surface2=Color3.fromRGB(25,17,19),text=Color3.fromRGB(245,239,241),muted=Color3.fromRGB(175,145,151),border=Color3.fromRGB(72,39,45),accent=Color3.fromRGB(220,55,75)},
+    ["Softcore Pink"]={bg=Color3.fromRGB(255,247,251),surface=Color3.fromRGB(255,255,255),surface2=Color3.fromRGB(255,240,246),text=Color3.fromRGB(74,59,66),muted=Color3.fromRGB(155,135,144),border=Color3.fromRGB(245,220,231),accent=Color3.fromRGB(232,137,170)},
+    ["Lavender Dream"]={bg=Color3.fromRGB(249,247,255),surface=Color3.fromRGB(255,255,255),surface2=Color3.fromRGB(243,238,255),text=Color3.fromRGB(67,60,82),muted=Color3.fromRGB(137,128,155),border=Color3.fromRGB(224,215,244),accent=Color3.fromRGB(158,132,220)},
+    ["Cloud Blue"]={bg=Color3.fromRGB(246,251,255),surface=Color3.fromRGB(255,255,255),surface2=Color3.fromRGB(234,245,255),text=Color3.fromRGB(54,68,82),muted=Color3.fromRGB(125,143,160),border=Color3.fromRGB(211,230,247),accent=Color3.fromRGB(105,174,225)},
+    Pearl={bg=Color3.fromRGB(247,247,248),surface=Color3.fromRGB(255,255,255),surface2=Color3.fromRGB(239,239,242),text=Color3.fromRGB(54,54,60),muted=Color3.fromRGB(130,130,138),border=Color3.fromRGB(220,220,224),accent=Color3.fromRGB(125,125,135)},
+}
+local currentThemeName="Midnight"
+pcall(function()
+    local f=CACHE_FOLDER.."/theme.txt"
+    if isfile and readfile and isfile(f) then local v=readfile(f); if THEMES[v] then currentThemeName=v end end
+end)
+local function saveThemeName(n)
+    pcall(function()
+        if makefolder and not isfolder(CACHE_FOLDER) then makefolder(CACHE_FOLDER) end
+        if writefile then writefile(CACHE_FOLDER.."/theme.txt",n) end
+    end)
+end
+local Main = new("Frame", {
     Name = "Main",
     Size = UDim2.fromOffset(MAIN_W, MAIN_H),
     Position = UDim2.new(0.5, -MAIN_W / 2, 0.5, -MAIN_H / 2),
-    BackgroundColor3 = CurrentTheme.Background,
+    BackgroundColor3 = Color3.fromRGB(5, 5, 6),
     BorderSizePixel = 0,
     Active = true,
 }, ScreenGui)
 addCorner(Main, 17)
-addStroke(Main, CurrentTheme.BubbleMine, 0.05, 1)
+addStroke(Main, Color3.fromRGB(31, 31, 34), 0.05, 1)
 
 -- Header is intentionally compact.
 local Header = new("Frame", {
@@ -542,49 +405,39 @@ local Header = new("Frame", {
     Active = true,
 }, Main)
 
--- Compact tab switcher. Options appear only when pressed.
+-- Server Chat / DM switch. One tap changes between the two views.
 local TabSwitch = new("TextButton", {
     Name = "TabSwitch",
-    AnchorPoint = Vector2.new(0, 0.5),
-    Position = UDim2.fromOffset(10, 23),
-    Size = UDim2.fromOffset(72, 28),
-    BackgroundColor3 = CurrentTheme.Surface,
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromOffset(28, 23),
+    Size = UDim2.fromOffset(32, 32),
+    BackgroundColor3 = Color3.fromRGB(16, 16, 19),
     BorderSizePixel = 0,
     Font = Enum.Font.GothamBold,
-    Text = "Switch",
-    TextColor3 = CurrentTheme.Text,
-    TextSize = 10,
+    Text = "SW",
+    TextColor3 = Color3.fromRGB(225, 225, 230),
+    TextSize = 9,
     AutoButtonColor = false,
-    ZIndex = 20,
+    ZIndex = 12,
 }, Header)
 addCorner(TabSwitch, 999)
-local TabSwitchStroke = addStroke(TabSwitch, CurrentTheme.Border, 0.35, 1)
+addStroke(TabSwitch, Color3.fromRGB(65, 65, 72), 0.35, 1)
 
 local TabPopover = new("Frame", {
-    Name = "TabPopover",
-    Position = UDim2.fromOffset(10, 50),
-    Size = UDim2.fromOffset(214, 40),
-    BackgroundColor3 = CurrentTheme.Surface,
-    BorderSizePixel = 0,
-    Visible = false,
-    ZIndex = 40,
+    Name="TabPopover", Position=UDim2.fromOffset(8,43), Size=UDim2.fromOffset(116,126),
+    BackgroundColor3=Color3.fromRGB(16,16,19), BorderSizePixel=0, Visible=false, ZIndex=80,
 }, Main)
-addCorner(TabPopover, 13)
-local TabPopoverStroke = addStroke(TabPopover, CurrentTheme.Border, 0.2, 1)
-
-local function makeTabOption(name, x, width)
-    local b = new("TextButton", {
-        Position = UDim2.fromOffset(x, 4), Size = UDim2.fromOffset(width, 32),
-        BackgroundColor3 = CurrentTheme.Surface2, BackgroundTransparency = 0.2,
-        BorderSizePixel = 0, Text = name, TextSize = 9, Font = Enum.Font.GothamBold,
-        TextColor3 = CurrentTheme.Text, AutoButtonColor = false, ZIndex = 41,
-    }, TabPopover)
-    addCorner(b, 10)
-    return b
+addCorner(TabPopover,12)
+addStroke(TabPopover,Color3.fromRGB(55,55,62),0.15,1)
+new("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},TabPopover)
+new("UIPadding",{PaddingTop=UDim.new(0,7),PaddingBottom=UDim.new(0,7),PaddingLeft=UDim.new(0,7),PaddingRight=UDim.new(0,7)},TabPopover)
+local function tabChoice(label,order)
+    local b=new("TextButton",{Size=UDim2.new(1,0,0,32),BackgroundColor3=Color3.fromRGB(22,22,25),BorderSizePixel=0,Text=label,TextColor3=Color3.fromRGB(225,225,230),TextSize=9,Font=Enum.Font.GothamBold,AutoButtonColor=false,ZIndex=81,LayoutOrder=order},TabPopover)
+    addCorner(b,9); return b
 end
-local DMTab = makeTabOption("DM", 4, 62)
-local ChatTab = makeTabOption("CHAT", 70, 62)
-local SettingsTab = makeTabOption("⚙", 136, 74)
+local ChatChoice=tabChoice("CHAT",1)
+local DMChoice=tabChoice("DM",2)
+local SettingsChoice=tabChoice("SETTINGS",3)
 
 -- Anchor / Unanchor button, matching the Saiki Emotes behavior.
 local anchored = false
@@ -669,268 +522,47 @@ local DMRoot = new("Frame", {
 }, Main)
 
 
--- -----------------------------------------------------------------------------
--- Settings tab
--- -----------------------------------------------------------------------------
--- Settings is its own lightweight ScrollingFrame.  The old version used a
--- normal Frame, so mouse-wheel/touch scrolling could never work here.
-local SettingsRoot = new("ScrollingFrame", {
-    Name = "SettingsRoot",
-    Position = UDim2.fromOffset(12, 49),
-    Size = UDim2.new(1, -24, 1, -103),
-    BackgroundTransparency = 1,
-    BorderSizePixel = 0,
-    Visible = false,
-    ScrollBarThickness = 3,
-    ScrollBarImageColor3 = CurrentTheme.Border,
-    ScrollBarImageTransparency = 0.25,
-    CanvasSize = UDim2.fromOffset(0, 450),
-    AutomaticCanvasSize = Enum.AutomaticSize.None,
-    ScrollingDirection = Enum.ScrollingDirection.Y,
-    ClipsDescendants = true,
-}, Main)
+local SettingsRoot=new("Frame",{
+    Name="SettingsRoot",Position=UDim2.fromOffset(12,49),Size=UDim2.new(1,-24,1,-103),
+    BackgroundTransparency=1,BorderSizePixel=0,Visible=false,
+},Main)
+new("TextLabel",{Position=UDim2.fromOffset(4,4),Size=UDim2.new(1,-8,0,20),BackgroundTransparency=1,Text="SETTINGS",TextColor3=Color3.fromRGB(155,155,162),TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},SettingsRoot)
+local CurrentThemeCard=new("Frame",{Position=UDim2.fromOffset(4,30),Size=UDim2.new(1,-8,0,62),BackgroundColor3=Color3.fromRGB(16,16,19),BorderSizePixel=0},SettingsRoot)
+addCorner(CurrentThemeCard,13)
+local CurrentThemeTitle=new("TextLabel",{Position=UDim2.fromOffset(12,8),Size=UDim2.new(1,-24,0,18),BackgroundTransparency=1,Text="Current theme",TextColor3=Color3.fromRGB(232,232,235),TextSize=11,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},CurrentThemeCard)
+local CurrentThemeValue=new("TextLabel",{Position=UDim2.fromOffset(12,29),Size=UDim2.new(1,-24,0,18),BackgroundTransparency=1,Text=currentThemeName,TextColor3=Color3.fromRGB(155,155,162),TextSize=9,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},CurrentThemeCard)
 
-local SettingsPadding = new("UIPadding", {
-    PaddingTop = UDim.new(0, 2),
-    PaddingBottom = UDim.new(0, 10),
-    PaddingLeft = UDim.new(0, 1),
-    PaddingRight = UDim.new(0, 5),
-}, SettingsRoot)
+local ThemeGrid=new("Frame",{Position=UDim2.fromOffset(4,98),Size=UDim2.new(1,-8,0,143),BackgroundTransparency=1,BorderSizePixel=0},SettingsRoot)
+new("UIGridLayout",{CellSize=UDim2.new(0.5,-4,0,44),CellPadding=UDim2.fromOffset(8,5),SortOrder=Enum.SortOrder.LayoutOrder},ThemeGrid)
+local ThemeButtons={}
+local themeOrder={"Midnight","Ultron","Softcore Pink","Lavender Dream","Cloud Blue","Pearl"}
 
-local SettingsTitle = new("TextLabel", {
-    Position = UDim2.fromOffset(4, 2), Size = UDim2.new(1,-9,0,28),
-    BackgroundTransparency = 1, Text = "Settings", TextXAlignment = Enum.TextXAlignment.Left,
-    Font = Enum.Font.GothamBold, TextSize = 21, TextColor3 = CurrentTheme.Text,
-}, SettingsRoot)
-local SettingsSub = new("TextLabel", {
-    Position = UDim2.fromOffset(5, 29), Size = UDim2.new(1,-10,0,20),
-    BackgroundTransparency = 1, Text = "Customize your Saiki Rechat", TextXAlignment = Enum.TextXAlignment.Left,
-    Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = CurrentTheme.Muted,
-}, SettingsRoot)
-local AppearanceLabel = new("TextLabel", {
-    Position = UDim2.fromOffset(5, 57), Size = UDim2.new(1,-10,0,18),
-    BackgroundTransparency = 1, Text = "APPEARANCE", TextXAlignment = Enum.TextXAlignment.Left,
-    Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = CurrentTheme.Muted,
-}, SettingsRoot)
-
--- Current-theme card.  It is always visible, so the user can immediately see
--- which theme is active without opening the selector.
-local ThemeButton = new("TextButton", {
-    Position = UDim2.fromOffset(4, 79), Size = UDim2.new(1,-9,0,70),
-    BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0, Text = "", AutoButtonColor = false,
-}, SettingsRoot)
-addCorner(ThemeButton, 14)
-local ThemeButtonStroke = addStroke(ThemeButton, CurrentTheme.Border, 0.35, 1)
-
-local ThemeLabel = new("TextLabel", {
-    Position = UDim2.fromOffset(14, 7), Size = UDim2.new(1,-164,0,18), BackgroundTransparency = 1,
-    Text = "Current theme", TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamBold,
-    TextSize = 11, TextColor3 = CurrentTheme.Text,
-}, ThemeButton)
-local ThemeValue = new("TextLabel", {
-    Position = UDim2.fromOffset(14, 27), Size = UDim2.new(1,-164,0,17), BackgroundTransparency = 1,
-    Text = CURRENT_THEME_NAME, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.Gotham,
-    TextSize = 9, TextColor3 = CurrentTheme.Muted,
-}, ThemeButton)
-local ThemeHint = new("TextLabel", {
-    Position = UDim2.fromOffset(14, 45), Size = UDim2.new(1,-164,0,14), BackgroundTransparency = 1,
-    Text = "Tap to choose a different theme", TextXAlignment = Enum.TextXAlignment.Left,
-    Font = Enum.Font.Gotham, TextSize = 7, TextColor3 = CurrentTheme.Muted,
-}, ThemeButton)
-
--- Mini live preview: background + two bubbles + accent indicator.
-local ThemePreview = new("Frame", {
-    AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1,-32,0.5,0),
-    Size = UDim2.fromOffset(108, 52), BackgroundColor3 = CurrentTheme.Background,
-    BorderSizePixel = 0, ClipsDescendants = true,
-}, ThemeButton)
-addCorner(ThemePreview, 11)
-addStroke(ThemePreview, CurrentTheme.Border, 0.15, 1)
-local PreviewOther = new("Frame", {
-    Position = UDim2.fromOffset(8, 8), Size = UDim2.fromOffset(46, 15),
-    BackgroundColor3 = CurrentTheme.BubbleOther, BorderSizePixel = 0,
-}, ThemePreview)
-addCorner(PreviewOther, 999)
-local PreviewMine = new("Frame", {
-    AnchorPoint = Vector2.new(1,0), Position = UDim2.new(1,-8,0,28), Size = UDim2.fromOffset(42, 15),
-    BackgroundColor3 = CurrentTheme.BubbleMine, BorderSizePixel = 0,
-}, ThemePreview)
-addCorner(PreviewMine, 999)
-local PreviewAccent = new("Frame", {
-    Position = UDim2.fromOffset(8, 29), Size = UDim2.fromOffset(12, 3),
-    BackgroundColor3 = CurrentTheme.Accent, BorderSizePixel = 0,
-}, ThemePreview)
-addCorner(PreviewAccent, 999)
-local ThemeArrow = new("TextLabel", {
-    AnchorPoint = Vector2.new(1,0.5), Position = UDim2.new(1,-10,0.5,0), Size = UDim2.fromOffset(15,20),
-    BackgroundTransparency = 1, Text = ">", TextSize = 15, Font = Enum.Font.GothamBold,
-    TextColor3 = CurrentTheme.Muted, ZIndex = 5,
-}, ThemeButton)
-
-local ThemePicker = new("ScrollingFrame", {
-    Position = UDim2.fromOffset(4, 155), Size = UDim2.new(1,-9,0,210),
-    BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0, Visible = false, ZIndex = 30,
-    ScrollBarThickness = 3, ScrollBarImageColor3 = CurrentTheme.Border,
-    CanvasSize = UDim2.fromOffset(0, 330),
-    AutomaticCanvasSize = Enum.AutomaticSize.None,
-    ScrollingDirection = Enum.ScrollingDirection.Y,
-    ClipsDescendants = true,
-}, SettingsRoot)
-addCorner(ThemePicker, 14)
-local ThemePickerStroke = addStroke(ThemePicker, CurrentTheme.Border, 0.2, 1)
-new("UIPadding", {PaddingTop=UDim.new(0,7), PaddingBottom=UDim.new(0,7), PaddingLeft=UDim.new(0,7), PaddingRight=UDim.new(0,7)}, ThemePicker)
-new("UIListLayout", {Padding=UDim.new(0,5), SortOrder=Enum.SortOrder.LayoutOrder}, ThemePicker)
-
-local themeNames = {"Midnight","Ultron","SoftcorePink","LavenderDream","CloudBlue","Pearl"}
-local themeRows = {}
-local selectedThemeMarker
-
-local function prettyThemeName(name)
-    local map = {
-        SoftcorePink="Softcore Pink", LavenderDream="Lavender Dream", CloudBlue="Cloud Blue"
-    }
-    return map[name] or name
-end
-
-local function updateCurrentThemePreview(themeName)
-    local theme = THEMES[themeName]
-    if not theme then return end
-    ThemeValue.Text = prettyThemeName(themeName)
-    ThemePreview.BackgroundColor3 = theme.Background
-    PreviewOther.BackgroundColor3 = theme.BubbleOther
-    PreviewMine.BackgroundColor3 = theme.BubbleMine
-    PreviewAccent.BackgroundColor3 = theme.Accent
-    ThemeButton.BackgroundColor3 = theme.Surface
-    ThemeButtonStroke.Color = theme.Border
-    ThemeLabel.TextColor3 = theme.Text
-    ThemeValue.TextColor3 = theme.Muted
-    ThemeHint.TextColor3 = theme.Muted
-    ThemeArrow.TextColor3 = theme.Muted
-    ThemePicker.BackgroundColor3 = theme.Surface
-    ThemePickerStroke.Color = theme.Border
-    for name, row in pairs(themeRows) do
-        local palette = THEMES[name]
-        row.BackgroundColor3 = palette.Surface2
-        row.TextColor3 = palette.Text
-        local swatch = row:FindFirstChild("Swatch")
-        local accent = row:FindFirstChild("Accent")
-        local check = row:FindFirstChild("Selected")
-        if swatch then swatch.BackgroundColor3 = palette.Background end
-        if accent then accent.BackgroundColor3 = palette.Accent end
-        if check then
-            check.Visible = name == themeName
-            check.BackgroundColor3 = palette.Accent
-        end
+local function updateThemeButtons()
+    for name,b in pairs(ThemeButtons) do
+        local t=THEMES[name]
+        b.BackgroundColor3=t.surface2
+        b.TextColor3=t.text
+        local mark=b:FindFirstChild("Mark")
+        if mark then mark.Visible=(name==currentThemeName);mark.BackgroundColor3=t.accent end
     end
+    CurrentThemeValue.Text=currentThemeName
 end
 
-for i, themeName in ipairs(themeNames) do
-    local palette = THEMES[themeName]
-    local row = new("TextButton", {
-        Size = UDim2.new(1,0,0,48),
-        BackgroundColor3 = palette.Surface2,
-        BackgroundTransparency = 0,
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = false,
-        ZIndex = 31,
-        LayoutOrder = i,
-    }, ThemePicker)
-    addCorner(row, 11)
+local applyCleanTheme
 
-    local swatch = new("Frame", {
-        Name="Swatch", Position=UDim2.fromOffset(8,8), Size=UDim2.fromOffset(46,32),
-        BackgroundColor3=palette.Background, BorderSizePixel=0, ZIndex=32,
-    }, row)
-    addCorner(swatch, 8)
-    new("Frame", {
-        Name="Accent", Position=UDim2.fromOffset(7,24), Size=UDim2.fromOffset(16,3),
-        BackgroundColor3=palette.Accent, BorderSizePixel=0, ZIndex=33,
-    }, swatch)
-    local bubble = new("Frame", {
-        Position=UDim2.new(1,-9,0,7), AnchorPoint=Vector2.new(1,0), Size=UDim2.fromOffset(24,8),
-        BackgroundColor3=palette.BubbleMine, BorderSizePixel=0, ZIndex=33,
-    }, swatch)
-    addCorner(bubble, 999)
-    local bubble2 = new("Frame", {
-        Position=UDim2.fromOffset(8,17), Size=UDim2.fromOffset(27,8),
-        BackgroundColor3=palette.BubbleOther, BorderSizePixel=0, ZIndex=33,
-    }, swatch)
-    addCorner(bubble2, 999)
-
-    new("TextLabel", {
-        Position=UDim2.fromOffset(64,7), Size=UDim2.new(1,-105,0,18),
-        BackgroundTransparency=1, Text=prettyThemeName(themeName), TextXAlignment=Enum.TextXAlignment.Left,
-        Font=Enum.Font.GothamBold, TextSize=10, TextColor3=palette.Text, ZIndex=32,
-    }, row)
-    new("TextLabel", {
-        Position=UDim2.fromOffset(64,25), Size=UDim2.new(1,-105,0,14),
-        BackgroundTransparency=1, Text=(themeName == "SoftcorePink" and "Light • soft • lovely" or "Dark • balanced • compact"),
-        TextXAlignment=Enum.TextXAlignment.Left, Font=Enum.Font.Gotham, TextSize=7,
-        TextColor3=palette.Muted, ZIndex=32,
-    }, row)
-    local check = new("Frame", {
-        Name="Selected", AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,-10,0.5,0),
-        Size=UDim2.fromOffset(12,12), BackgroundColor3=palette.Accent, BorderSizePixel=0,
-        Visible=(themeName == CURRENT_THEME_NAME), ZIndex=34,
-    }, row)
-    addCorner(check, 999)
-    new("TextLabel", {
-        BackgroundTransparency=1, Size=UDim2.fromScale(1,1), Text="✓", Font=Enum.Font.GothamBold,
-        TextSize=8, TextColor3=Color3.new(1,1,1), ZIndex=35,
-    }, check)
-
-    themeRows[themeName] = row
-    row.Activated:Connect(function()
-        if CURRENT_THEME_NAME == themeName then
-            ThemePicker.Visible = false
-            return
-        end
-        saveTheme(themeName)
-        ThemePicker.Visible = false
-        themeTagTree(Main)
-        applyTheme(themeName, false)
-        updateCurrentThemePreview(themeName)
-    end)
+for i,name in ipairs(themeOrder) do
+    local t=THEMES[name]
+    local b=new("TextButton",{Name=name,LayoutOrder=i,BackgroundColor3=t.surface2,BorderSizePixel=0,Text=name,TextColor3=t.text,TextSize=9,Font=Enum.Font.GothamBold,AutoButtonColor=false},ThemeGrid)
+    addCorner(b,11)
+    local mark=new("Frame",{Name="Mark",AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,-9,0.5,0),Size=UDim2.fromOffset(9,9),BackgroundColor3=t.accent,BorderSizePixel=0,Visible=name==currentThemeName},b)
+    addCorner(mark,99)
+    ThemeButtons[name]=b
+    b.Activated:Connect(function() applyCleanTheme(name,true) end)
 end
-
--- Keep each theme preview visually faithful to its own palette instead of
--- allowing the global theme pass to recolor the preview list.
-ThemePicker:SetAttribute("SaikiThemeStatic", true)
-for _, obj in ipairs(ThemePicker:GetDescendants()) do
-    obj:SetAttribute("SaikiThemeStatic", true)
-end
-
--- The previous build created the picker but never connected the Theme button.
--- This is the missing interaction that prevented theme switching entirely.
-ThemeButton.Activated:Connect(function()
-    ThemePicker.Visible = not ThemePicker.Visible
-    if ThemePicker.Visible then
-        ThemePicker.CanvasPosition = Vector2.new(0,0)
-        updateCurrentThemePreview(CURRENT_THEME_NAME)
-    end
-end)
-
-local PerformanceLabel = new("TextLabel", {
-    Position = UDim2.fromOffset(5, 377), Size = UDim2.new(1,-10,0,18), BackgroundTransparency = 1,
-    Text = "PERFORMANCE", TextXAlignment = Enum.TextXAlignment.Left,
-    Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = CurrentTheme.Muted,
-}, SettingsRoot)
-local PerformanceInfo = new("TextLabel", {
-    Position = UDim2.fromOffset(4, 397), Size = UDim2.new(1,-9,0,32),
-    BackgroundColor3 = CurrentTheme.Surface, BorderSizePixel = 0,
-    Text = "Low-lag design  •  incremental updates  •  no tab rebuilding",
-    TextXAlignment = Enum.TextXAlignment.Center, TextYAlignment = Enum.TextYAlignment.Center,
-    Font = Enum.Font.Gotham, TextSize = 8, TextColor3 = CurrentTheme.Muted,
-}, SettingsRoot)
-addCorner(PerformanceInfo, 12)
-
-themeTagTree(Main)
-applyTheme(CURRENT_THEME_NAME, true)
-updateCurrentThemePreview(CURRENT_THEME_NAME)
+new("TextLabel",{Position=UDim2.fromOffset(4,242),Size=UDim2.new(1,-8,0,18),BackgroundColor3=Color3.fromRGB(16,16,19),BorderSizePixel=0,Text="Smooth themes • saved locally",TextColor3=Color3.fromRGB(155,155,162),TextSize=8,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Center,TextYAlignment=Enum.TextYAlignment.Center},SettingsRoot)
 
 local DMSearch = new("TextBox", {
-    BackgroundColor3 = CurrentTheme.Surface,
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
     Position = UDim2.fromOffset(0, 0),
     Size = UDim2.new(1, 0, 0, 36),
     BorderSizePixel = 0,
@@ -958,7 +590,7 @@ local DMServerPanel = new("Frame", {
     Name = "ServerPanel",
     Position = UDim2.fromOffset(0, 0),
     Size = UDim2.new(0.5, -4, 1, 0),
-    BackgroundColor3 = CurrentTheme.Surface2,
+    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
     BorderSizePixel = 0,
 }, DMHome)
 addCorner(DMServerPanel, 12)
@@ -968,7 +600,7 @@ local DMHistoryPanel = new("Frame", {
     Name = "HistoryPanel",
     Position = UDim2.new(0.5, 4, 0, 0),
     Size = UDim2.new(0.5, -4, 1, 0),
-    BackgroundColor3 = CurrentTheme.Surface2,
+    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
     BorderSizePixel = 0,
 }, DMHome)
 addCorner(DMHistoryPanel, 12)
@@ -1015,7 +647,7 @@ local DMHeader = new("Frame", {
     Name = "ConversationHeader",
     Position = UDim2.fromOffset(0, 0),
     Size = UDim2.new(1, 0, 0, 34),
-    BackgroundColor3 = CurrentTheme.Surface,
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
     BorderSizePixel = 0,
     Visible = false,
 }, DMRoot)
@@ -1055,7 +687,7 @@ local Composer = new("Frame", {
     Name = "Composer",
     Position = UDim2.new(0, 12, 1, -51),
     Size = UDim2.new(1, -24, 0, 38),
-    BackgroundColor3 = CurrentTheme.Surface,
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
     BorderSizePixel = 0,
 }, Main)
 addCorner(Composer, 999)
@@ -1091,7 +723,7 @@ addCorner(StickerOpen, 14)
 
 -- Small circular image button using the user's SendIcon.jpg.
 local Send = new("ImageButton", {
-    BackgroundColor3 = CurrentTheme.Surface2,
+    BackgroundColor3 = Color3.fromRGB(24, 24, 27),
     Position = UDim2.new(1, -37, 0.5, -14),
     Size = UDim2.fromOffset(28, 28),
     Image = SEND_ASSET,
@@ -1105,14 +737,14 @@ local ReplyBar = new("Frame", {
     Visible = false,
     Position = UDim2.new(0, 1, 0, -35),
     Size = UDim2.new(1, -2, 0, 31),
-    BackgroundColor3 = CurrentTheme.Surface2,
+    BackgroundColor3 = Color3.fromRGB(17, 17, 19),
     BorderSizePixel = 0,
     ZIndex = 10,
 }, Composer)
 addCorner(ReplyBar, 8)
 
 new("Frame", {
-    BackgroundColor3 = CurrentTheme.Accent,
+    BackgroundColor3 = Color3.fromRGB(45, 160, 232),
     BorderSizePixel = 0,
     Position = UDim2.fromOffset(0, 5),
     Size = UDim2.new(0, 2, 1, -10),
@@ -1125,7 +757,7 @@ local ReplyLabel = new("TextLabel", {
     Size = UDim2.new(1, -42, 0, 10),
     Font = Enum.Font.GothamBold,
     Text = "REPLY",
-    TextColor3 = CurrentTheme.Accent,
+    TextColor3 = Color3.fromRGB(45, 160, 232),
     TextSize = 7,
     TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 11,
@@ -1175,7 +807,7 @@ local StickerPanel = new("Frame", {
     Name = "StickerPanel",
     Size = UDim2.fromOffset(330, 245),
     Position = UDim2.new(1, -342, 1, -299),
-    BackgroundColor3 = CurrentTheme.Surface2,
+    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
     BackgroundTransparency = 0.02,
     BorderSizePixel = 0,
     Visible = false,
@@ -1566,7 +1198,7 @@ local function renderStickerGrid()
     local buttons = {}
     for i, sticker in ipairs(items) do
         local b = new("ImageButton", {
-            BackgroundColor3 = CurrentTheme.Surface2,
+            BackgroundColor3 = Color3.fromRGB(20,20,23),
             BorderSizePixel = 0,
             Image = "",
             ScaleType = Enum.ScaleType.Fit,
@@ -2447,10 +2079,6 @@ local function closeDMConversation()
     renderDMResults()
 end
 
-local function closeTabPopover()
-    TabPopover.Visible = false
-end
-
 local function switchTab(tab)
     activeTab=tab
     local dm=tab=="dm"
@@ -2458,53 +2086,37 @@ local function switchTab(tab)
     Scroll.Visible=not dm and not settings
     DMRoot.Visible=dm
     SettingsRoot.Visible=settings
-    Composer.Visible=not settings and (not dm or activeDMUser ~= nil)
-    StickerOpen.Visible=not settings and ((not dm) or activeDMUser ~= nil)
-    if settings then StickerPanel.Visible=false end
-    if not settings then ThemePicker.Visible = false end
-    closeTabPopover()
+    Composer.Visible=not settings and (not dm or activeDMUser~=nil)
+    StickerOpen.Visible=(not dm and not settings) or activeDMUser~=nil
+    if settings then
+        Input.Text=""
+        TabSwitch.Text="SW"
+        TabPopover.Visible=false
+        updateThemeButtons()
+        return
+    end
+    TabSwitch.Text=dm and "CHAT" or "DM"
     if dm then
-        clearReply()
-        Input.Text=""
-        Composer.Visible=activeDMUser ~= nil
-        StickerOpen.Visible=activeDMUser ~= nil
-        Input.PlaceholderText=""
-        if not activeDMUser then
-            DMHeader.Visible=false
-            DMConversation.Visible=false
-            DMSearch.Visible=true
-            DMHome.Visible=true
-            DMResults.Visible=false
-        end
-        loadDMCandidates()
-        renderDMResults()
+        clearReply();Input.Text="";Composer.Visible=activeDMUser~=nil;StickerOpen.Visible=activeDMUser~=nil;Input.PlaceholderText=""
+        if not activeDMUser then DMHeader.Visible=false;DMConversation.Visible=false;DMSearch.Visible=true;DMHome.Visible=true;DMResults.Visible=false end
+        loadDMCandidates();renderDMResults()
     else
-        Composer.Visible=true
-        Input.Text=""
-        Input.PlaceholderText="Type message..."
+        Composer.Visible=true;Input.Text="";Input.PlaceholderText="Type message..."
     end
 end
-
 DMBack.MouseButton1Click:Connect(closeDMConversation)
 DMSearch:GetPropertyChangedSignal("Text"):Connect(function() if activeTab=="dm" and not activeDMUser then renderDMResults() end end)
 Players.PlayerAdded:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
 Players.PlayerRemoving:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
-TabSwitch.Activated:Connect(function()
-    TabPopover.Visible = not TabPopover.Visible
-end)
-DMTab.Activated:Connect(function() switchTab("dm") end)
-ChatTab.Activated:Connect(function() switchTab("server") end)
-SettingsTab.Activated:Connect(function() switchTab("settings") end)
-
-UserInputService.InputBegan:Connect(function(input, processed)
-    if not TabPopover.Visible then return end
-    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    local p = input.Position
-    local function inside(gui)
-        local a, z = gui.AbsolutePosition, gui.AbsoluteSize
-        return p.X >= a.X and p.X <= a.X + z.X and p.Y >= a.Y and p.Y <= a.Y + z.Y
+TabSwitch.Activated:Connect(function()TabPopover.Visible=not TabPopover.Visible end)
+ChatChoice.Activated:Connect(function()switchTab("server");TabPopover.Visible=false end)
+DMChoice.Activated:Connect(function()switchTab("dm");TabPopover.Visible=false end)
+SettingsChoice.Activated:Connect(function()switchTab("settings");TabPopover.Visible=false end)
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 and TabPopover.Visible then
+        local p=input.Position;local q=TabPopover.AbsolutePosition;local z=TabPopover.AbsoluteSize
+        if not(p.X>=q.X and p.X<=q.X+z.X and p.Y>=q.Y and p.Y<=q.Y+z.Y) then TabPopover.Visible=false end
     end
-    if not inside(TabPopover) and not inside(TabSwitch) then closeTabPopover() end
 end)
 
 -- -----------------------------------------------------------------------------
@@ -2531,7 +2143,7 @@ clearReply = function()
     ReplyBar.Visible = false
     ReplyText.Text = ""
     if Composer and Composer.Parent then
-        tween(Composer, {BackgroundColor3 = CurrentTheme.Surface}, 0.12)
+        tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.12)
     end
 end
 
@@ -2580,7 +2192,7 @@ local Popup = new("Frame", {
     Name = "MessageActions",
     Size = UDim2.fromOffset(280, 270),
     Position = UDim2.new(0.5, -140, 0.5, -135),
-    BackgroundColor3 = CurrentTheme.Surface,
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
     BorderSizePixel = 0,
     ZIndex = 101,
 }, PopupShade)
@@ -2629,7 +2241,7 @@ new("UIListLayout", {
 
 local function popupButton(text)
     local b = new("TextButton", {
-        BackgroundColor3 = CurrentTheme.Surface2,
+        BackgroundColor3 = Color3.fromRGB(23, 23, 26),
         BorderSizePixel = 0,
         Size = UDim2.fromOffset(78, 34),
         Font = Enum.Font.GothamBold,
@@ -2998,7 +2610,7 @@ function updateReactionBadges(card)
         local count = counts[emoji]
         local pillWidth = count > 1 and 34 or 22
         local pill = new("Frame", {
-            BackgroundColor3 = CurrentTheme.Surface2,
+            BackgroundColor3 = Color3.fromRGB(27, 27, 30),
             BorderSizePixel = 0,
             Size = UDim2.fromOffset(pillWidth, 18),
             Position = UDim2.fromOffset((i - 1) * 24, 1),
@@ -3179,7 +2791,7 @@ renderMessage = function(message)
     -- geometry and color as every other message received from another user.
     -- Only the sender identity/avatar remains Ultron.
     local bubble = new("Frame", {
-        BackgroundColor3 = mine and CurrentTheme.BubbleMine or CurrentTheme.BubbleOther,
+        BackgroundColor3 = mine and Color3.fromRGB(31, 31, 34) or Color3.fromRGB(20, 20, 22),
         BorderSizePixel = 0,
         Position = UDim2.fromOffset(
             mine and groupLeft or groupLeft + avatarSize + groupGap,
@@ -3214,7 +2826,7 @@ renderMessage = function(message)
 
     if replyPreview then
         local quote = new("Frame", {
-            BackgroundColor3 = CurrentTheme.Surface2,
+            BackgroundColor3 = Color3.fromRGB(27, 27, 30),
             BorderSizePixel = 0,
             Position = UDim2.fromOffset(8, contentY),
             Size = UDim2.new(1, -16, 0, 32),
@@ -3222,7 +2834,7 @@ renderMessage = function(message)
         addCorner(quote, 9)
 
         new("Frame", {
-            BackgroundColor3 = CurrentTheme.Accent,
+            BackgroundColor3 = Color3.fromRGB(45, 160, 232),
             BorderSizePixel = 0,
             Position = UDim2.fromOffset(0, 5),
             Size = UDim2.new(0, 2, 1, -10),
@@ -3424,7 +3036,7 @@ showSlowMode = function(seconds)
     task.delay(math.min(seconds, 1), function()
         if Composer.Parent then
             Input.PlaceholderText = "Type message..."
-            tween(Composer, {BackgroundColor3 = CurrentTheme.Surface}, 0.18)
+            tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
         end
     end)
 end
@@ -3602,7 +3214,7 @@ local function sendMessage()
             task.delay(1, function()
                 if Composer.Parent then
                     Input.PlaceholderText = "Type message..."
-                    tween(Composer, {BackgroundColor3 = CurrentTheme.Surface}, 0.18)
+                    tween(Composer, {BackgroundColor3 = Color3.fromRGB(13, 13, 15)}, 0.18)
                 end
             end)
         end
@@ -3679,4 +3291,38 @@ getgenv().SaikiRechat = {
     Show = function() Main.Visible = true end,
 }
 
-print("[Saiki Rechat v18.2] Loaded | Server: " .. tostring(game.JobId))
+applyCleanTheme = function(name,animate)
+    local t=THEMES[name]
+    if not t then return end
+    currentThemeName=name
+    local function set(obj,prop,value)
+        if not obj then return end
+        if animate then tween(obj,{[prop]=value},0.20) else obj[prop]=value end
+    end
+    set(Main,"BackgroundColor3",t.bg)
+    set(TabSwitch,"BackgroundColor3",t.surface)
+    set(TabPopover,"BackgroundColor3",t.surface)
+    set(Composer,"BackgroundColor3",t.surface)
+    set(Input,"TextColor3",t.text)
+    set(Input,"PlaceholderColor3",t.muted)
+    set(Scroll,"ScrollBarImageColor3",t.border)
+    set(DMSearch,"BackgroundColor3",t.surface)
+    set(DMSearch,"TextColor3",t.text)
+    set(DMSearch,"PlaceholderColor3",t.muted)
+    set(DMServerPanel,"BackgroundColor3",t.surface)
+    set(DMHistoryPanel,"BackgroundColor3",t.surface)
+    set(DMHeader,"BackgroundColor3",t.surface)
+    set(DMConversation,"ScrollBarImageColor3",t.border)
+    set(DMServerList,"ScrollBarImageColor3",t.border)
+    set(DMHistoryList,"ScrollBarImageColor3",t.border)
+    set(DMResults,"ScrollBarImageColor3",t.border)
+    set(CurrentThemeCard,"BackgroundColor3",t.surface)
+    set(CurrentThemeTitle,"TextColor3",t.text)
+    set(CurrentThemeValue,"TextColor3",t.muted)
+    set(AnchorCircle,"BackgroundColor3",t.surface)
+    updateThemeButtons()
+    saveThemeName(name)
+end
+
+pcall(function()applyCleanTheme(currentThemeName,false)end)
+print("[Saiki Rechat v19] Loaded | Server: " .. tostring(game.JobId))
