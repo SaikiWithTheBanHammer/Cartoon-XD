@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v20.3
+    SAIKI RECHAT v22
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -663,6 +663,22 @@ local DMConversation = new("ScrollingFrame", {
 }, DMRoot)
 new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center}, DMConversation)
 new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 7)}, DMConversation)
+
+local DMLoading = new("TextLabel", {
+    Name = "DMLoading",
+    BackgroundTransparency = 1,
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(180, 34),
+    Font = Enum.Font.Gotham,
+    Text = "Loading chat...",
+    TextColor3 = Color3.fromRGB(105, 105, 112),
+    TextSize = 9,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    TextYAlignment = Enum.TextYAlignment.Center,
+    Visible = false,
+    ZIndex = 20,
+}, DMConversation)
 
 -- Composer.
 local Composer = new("Frame", {
@@ -1586,8 +1602,10 @@ local function makeDMRow(parent, candidate, compact)
         StickerOpen.Visible=true
         dmSeen={}
         for _, child in ipairs(DMConversation:GetChildren()) do
-            if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
+            if child:IsA("GuiObject") and child ~= DMLoading and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
         end
+        DMLoading.Text = "Loading chat..."
+        DMLoading.Visible = true
         Input.PlaceholderText=""
         -- Create/restore the lightweight thread metadata before reading it.
         -- This lets an existing DM conversation load immediately even when
@@ -1736,7 +1754,7 @@ local function renderDMMessage(msg)
     local mine = tonumber(msg.senderId) == tonumber(LocalPlayer.UserId)
     local isSticker = tostring(msg.type or "text") == "sticker"
     local textValue = tostring(msg.message or (isSticker and "Sticker") or "")
-    local dmTextPad = 11
+    local dmTextPad = 6
     local dmLineHeight = 13
     local bodyWidth
     local bodyHeight
@@ -1892,14 +1910,25 @@ local function renderDMMessage(msg)
 end
 
 loadDMMessages = function()
-    if not activeDMUser or not DMAuth.idToken then return end
+    if not activeDMUser or not DMAuth.idToken then
+        DMLoading.Text = "Unable to load chat"
+        DMLoading.Visible = true
+        return
+    end
+    DMLoading.Text = "Loading chat..."
+    DMLoading.Visible = true
     local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
     local extra='orderBy="$key"&limitToLast=30'
     local ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
     if not ok and dmRefreshAuthToken() then
         ok, data = requestJSON("GET", dmAuthURL("/dmThreads/"..urlEncode(thread).."/messages", DMAuth.idToken, extra))
     end
-    if not ok then return end
+    if not ok then
+        DMLoading.Text = "Couldn't load chat"
+        DMLoading.Visible = true
+        return
+    end
+    DMLoading.Visible = false
     local list={}
     for key,msg in pairs(data or {}) do
         if type(msg)=="table" then msg.key=key; table.insert(list,msg) end
@@ -1929,7 +1958,7 @@ loadDMMessages = function()
     -- were sent seconds, days, or months ago.
     local visible = {}
     for _,child in ipairs(DMConversation:GetChildren()) do
-        if child:IsA("Frame") and child ~= DMConversation:FindFirstChildOfClass("UIListLayout") then
+        if child:IsA("Frame") and child ~= DMLoading and child ~= DMConversation:FindFirstChildOfClass("UIListLayout") then
             table.insert(visible, child)
         end
     end
@@ -2099,7 +2128,7 @@ sendDM = function(stickerUrl, stickerAsset)
     -- represents a real DM message instead of a local-only fake send.
     dmSeen = {}
     for _, child in ipairs(DMConversation:GetChildren()) do
-        if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+        if child:IsA("GuiObject") and child ~= DMLoading and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
             child:Destroy()
         end
     end
@@ -2111,6 +2140,7 @@ local function closeDMConversation()
     activeDMUser=nil
     DMSearch.Text=""
     DMHeader.Visible=false; DMConversation.Visible=false; DMSearch.Visible=true; DMHome.Visible=true; DMResults.Visible=false
+    DMLoading.Visible=false
     Composer.Visible=false
     StickerOpen.Visible=false
     StickerPanel.Visible=false
@@ -2129,7 +2159,7 @@ local function switchTab(tab)
     TabSwitch.Text=dm and "CHAT" or "DM"
     if dm then
         clearReply();Input.Text="";Composer.Visible=activeDMUser~=nil;StickerOpen.Visible=activeDMUser~=nil;Input.PlaceholderText=""
-        if not activeDMUser then DMHeader.Visible=false;DMConversation.Visible=false;DMSearch.Visible=true;DMHome.Visible=true;DMResults.Visible=false end
+        if not activeDMUser then DMHeader.Visible=false;DMConversation.Visible=false;DMLoading.Visible=false;DMSearch.Visible=true;DMHome.Visible=true;DMResults.Visible=false end
         loadDMCandidates();renderDMResults()
     else
         Composer.Visible=true;Input.Text="";Input.PlaceholderText="Type message..."
@@ -2839,7 +2869,7 @@ renderMessage = function(message)
     -- NEW iPhone/WhatsApp-style text geometry. The width used for measuring
     -- the wrapped text is exactly the width later given to the TextLabel.
     -- No large vertical fudge factor is used.
-    local horizontalTextPad = 11
+    local horizontalTextPad = 6
     local textLineHeight = 13
     local bodyWidth, bodyHeight
     if isSticker then
@@ -2884,7 +2914,7 @@ renderMessage = function(message)
     -- Self messages use a wider WhatsApp/iPhone-style content area. The
     -- bubble is still content-sized, but never becomes an awkward tiny pill
     -- for normal sentences.
-    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth + 24, 72, 232)
+    local bubbleWidth = isSticker and 132 or math.clamp(bodyWidth, 72, 232)
 
     -- Fixed vertical geometry. Incoming messages have a sender row; self
     -- messages get a slightly larger top offset so their visible glyphs sit
@@ -3457,4 +3487,4 @@ applyCleanTheme = function(name,animate)
     if THEMES[name] then currentThemeName=name end
 end
 
-print("[Saiki Rechat v20.3] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v22] Loaded | Server: " .. tostring(game.JobId))
