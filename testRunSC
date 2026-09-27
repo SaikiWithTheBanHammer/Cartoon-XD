@@ -1132,7 +1132,11 @@ local function sendSticker(sticker)
         _stickerAsset = sticker.asset,
         timestamp = DateTime.now().UnixTimestampMillis,
     }
-    if replyKey then message.replyTo = replyKey end
+    if replyKey then
+        message.replyTo = replyKey
+        message.replyToText = tostring(replyPreviewText or "Message")
+        message.replyToDisplayName = tostring(replyDisplayName or "User")
+    end
 
     local optimisticKey = "local_sticker_" .. tostring(message.timestamp) .. "_" .. tostring(math.random(100000,999999))
     message.key = optimisticKey
@@ -1146,7 +1150,11 @@ local function sendSticker(sticker)
         displayName=message.displayName, type="sticker", sticker=message.sticker,
         timestamp=message.timestamp,
     }
-    if message.replyTo then payload.replyTo = message.replyTo end
+    if message.replyTo then
+        payload.replyTo = message.replyTo
+        payload.replyToText = message.replyToText
+        payload.replyToDisplayName = message.replyToDisplayName
+    end
 
     task.spawn(function()
         local ok, result = requestJSON("POST", authURL("/servers/" .. urlEncode(game.JobId) .. "/messages", Auth.idToken), payload)
@@ -1880,9 +1888,7 @@ local function renderDMMessage(msg)
     local holdTriggered = false
     local activeInput = nil
     hitbox.MouseButton1Click:Connect(function()
-        if not holdTriggered then
-            openMessagePopup(msg, true)
-        end
+        -- Normal tap is just normal message interaction; actions are long-press.
         holdTriggered = false
     end)
     hitbox.InputBegan:Connect(function(input)
@@ -2237,82 +2243,140 @@ removeCard = function(card)
 end
 
 -- -----------------------------------------------------------------------------
--- Centered long-press popup
+-- -----------------------------------------------------------------------------
+-- Instagram-style message action sheet
 -- -----------------------------------------------------------------------------
 local PopupShade = new("Frame", {
     Name = "PopupShade",
     Visible = false,
     Size = UDim2.fromScale(1, 1),
     BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-    BackgroundTransparency = 0.45,
+    BackgroundTransparency = 0.46,
     BorderSizePixel = 0,
-    ZIndex = 100,
+    ZIndex = 300,
 }, ScreenGui)
 
 local Popup = new("Frame", {
-    Name = "MessageActions",
-    Size = UDim2.fromOffset(280, 270),
-    Position = UDim2.new(0.5, -140, 0.5, -135),
-    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    Name = "InstagramMessageActions",
+    Size = UDim2.fromOffset(304, 218),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    BackgroundColor3 = Color3.fromRGB(18, 18, 20),
     BorderSizePixel = 0,
-    ZIndex = 101,
+    ZIndex = 301,
 }, PopupShade)
-addCorner(Popup, 14)
-addStroke(Popup, Color3.fromRGB(39, 39, 43), 0.05, 1)
-
-local PopupTitle = new("TextLabel", {
-    BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(16, 11),
-    Size = UDim2.new(1, -32, 0, 15),
-    Font = Enum.Font.GothamBold,
-    Text = "MESSAGE ACTIONS",
-    TextColor3 = Color3.fromRGB(45, 161, 235),
-    TextSize = 9,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 102,
-}, Popup)
+addCorner(Popup, 16)
+addStroke(Popup, Color3.fromRGB(52, 52, 57), 0.05, 1)
 
 local PopupPreview = new("TextLabel", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(16, 28),
-    Size = UDim2.new(1, -32, 0, 32),
+    Position = UDim2.fromOffset(16, 12),
+    Size = UDim2.new(1, -32, 0, 38),
     Font = Enum.Font.Gotham,
     Text = "",
-    TextColor3 = Color3.fromRGB(165, 165, 170),
+    TextColor3 = Color3.fromRGB(198, 198, 204),
     TextSize = 10,
     TextWrapped = true,
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Center,
     TextTruncate = Enum.TextTruncate.AtEnd,
-    ZIndex = 102,
+    ZIndex = 302,
 }, Popup)
+
+local QuickReactionBar = new("Frame", {
+    BackgroundColor3 = Color3.fromRGB(25, 25, 28),
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(10, 55),
+    Size = UDim2.new(1, -20, 0, 43),
+    ZIndex = 302,
+}, Popup)
+addCorner(QuickReactionBar, 13)
+
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    VerticalAlignment = Enum.VerticalAlignment.Center,
+    Padding = UDim.new(0, 2),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, QuickReactionBar)
+
+local activePopupMessage = nil
+local activePopupIsDM = false
+local closePopup
+local toggleMyReaction
+
+local function makeReactionButton(parent, reaction, size, z)
+    local b = new("ImageButton", {
+        BackgroundTransparency = 1,
+        AutoButtonColor = false,
+        Image = "",
+        ScaleType = Enum.ScaleType.Fit,
+        Size = size,
+        ZIndex = z,
+    }, parent)
+
+    local fallback = new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Font = Enum.Font.Gotham,
+        Text = reaction,
+        TextSize = 15,
+        TextColor3 = Color3.fromRGB(235, 235, 238),
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = z + 1,
+    }, b)
+
+    task.spawn(function()
+        local asset = cacheReactionAsset(reaction)
+        if asset and b.Parent then
+            b.Image = asset
+            fallback.Visible = false
+        end
+    end)
+
+    return b
+end
+
+-- The first 8 are the Instagram-like quick reaction row.
+for i = 1, math.min(8, #REACTIONS) do
+    local reaction = REACTIONS[i]
+    local b = makeReactionButton(QuickReactionBar, reaction, UDim2.fromOffset(31, 35), 304)
+    b.LayoutOrder = i
+    b.MouseButton1Click:Connect(function()
+        if activePopupMessage and toggleMyReaction(activePopupMessage.key, reaction) then
+            closePopup()
+        end
+    end)
+end
 
 local PopupButtons = new("Frame", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(12, 67),
-    Size = UDim2.new(1, -24, 0, 39),
-    ZIndex = 102,
+    Position = UDim2.fromOffset(12, 106),
+    Size = UDim2.new(1, -24, 0, 43),
+    ZIndex = 302,
 }, Popup)
 
 new("UIListLayout", {
     FillDirection = Enum.FillDirection.Horizontal,
     HorizontalAlignment = Enum.HorizontalAlignment.Center,
-    Padding = UDim.new(0, 6),
+    VerticalAlignment = Enum.VerticalAlignment.Center,
+    Padding = UDim.new(0, 7),
 }, PopupButtons)
 
 local function popupButton(text)
     local b = new("TextButton", {
-        BackgroundColor3 = Color3.fromRGB(23, 23, 26),
+        BackgroundColor3 = Color3.fromRGB(28, 28, 31),
         BorderSizePixel = 0,
-        Size = UDim2.fromOffset(78, 34),
+        Size = UDim2.fromOffset(84, 37),
         Font = Enum.Font.GothamBold,
         Text = text,
-        TextColor3 = Color3.fromRGB(205, 205, 210),
+        TextColor3 = Color3.fromRGB(225, 225, 230),
         TextSize = 9,
         AutoButtonColor = false,
-        ZIndex = 103,
+        ZIndex = 303,
     }, PopupButtons)
-    addCorner(b, 9)
+    addCorner(b, 10)
     return b
 end
 
@@ -2322,51 +2386,61 @@ local ReactAction = popupButton("REACT")
 
 local ReactionPanel = new("Frame", {
     Visible = false,
-    BackgroundColor3 = Color3.fromRGB(18, 18, 21),
+    BackgroundColor3 = Color3.fromRGB(22, 22, 25),
     BorderSizePixel = 0,
-    Position = UDim2.fromOffset(12, 111),
-    Size = UDim2.new(1, -24, 0, 136),
-    ZIndex = 104,
+    Position = UDim2.fromOffset(10, 154),
+    Size = UDim2.new(1, -20, 0, 54),
+    ZIndex = 306,
 }, Popup)
-addCorner(ReactionPanel, 9)
+addCorner(ReactionPanel, 11)
 
-new("UIGridLayout", {
-    CellSize = UDim2.fromOffset(34, 25),
-    CellPadding = UDim2.fromOffset(1, 1),
-    SortOrder = Enum.SortOrder.LayoutOrder,
+local reactionScroll = new("ScrollingFrame", {
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Size = UDim2.new(1, 0, 1, 0),
+    CanvasSize = UDim2.fromOffset(0, 0),
+    ScrollingDirection = Enum.ScrollingDirection.X,
+    ScrollBarThickness = 0,
+    ZIndex = 307,
 }, ReactionPanel)
 
-local activePopupMessage = nil
-local activePopupIsDM = false
-local closePopup
-local setLocalReaction
-local fetchReactionsForMessage
-local loadReactionAssets
-local toggleMyReaction
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    VerticalAlignment = Enum.VerticalAlignment.Center,
+    Padding = UDim.new(0, 2),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, reactionScroll)
 
--- Reaction data helpers. Reactions are stored as one emoji per Firebase UID,
--- so each user can change their reaction without creating duplicates.
+for i, reaction in ipairs(REACTIONS) do
+    local b = makeReactionButton(reactionScroll, reaction, UDim2.fromOffset(34, 45), 308)
+    b.LayoutOrder = i
+    b.MouseButton1Click:Connect(function()
+        if activePopupMessage and toggleMyReaction(activePopupMessage.key, reaction) then
+            closePopup()
+        end
+    end)
+end
+
+task.defer(function()
+    local layout = reactionScroll:FindFirstChildOfClass("UIListLayout")
+    if layout then
+        reactionScroll.CanvasSize = UDim2.fromOffset(layout.AbsoluteContentSize.X + 8, 0)
+    end
+end)
+
 local function setLocalReaction(messageKey, reaction)
     reactionState[messageKey] = reactionState[messageKey] or {}
     reactionState[messageKey][tostring(Auth.uid)] = reaction
-
     local card = cardByKey[messageKey]
-    if card then
-        updateReactionBadges(card)
-    end
+    if card and updateReactionBadges then updateReactionBadges(card) end
 end
 
-function fetchReactionsForMessage(messageKey)
+local function fetchServerReactions(messageKey)
     if not Auth.idToken or not messageKey then return false end
-
     local ok, data = requestJSON(
         "GET",
-        authURL(
-            "/servers/" .. urlEncode(game.JobId) .. "/reactions/" .. urlEncode(messageKey),
-            Auth.idToken
-        )
+        authURL("/servers/" .. urlEncode(game.JobId) .. "/reactions/" .. urlEncode(messageKey), Auth.idToken)
     )
-
     if not ok then return false end
 
     local state = {}
@@ -2377,84 +2451,71 @@ function fetchReactionsForMessage(messageKey)
             end
         end
     end
-
     reactionState[messageKey] = state
     local card = cardByKey[messageKey]
-    if card then
-        updateReactionBadges(card)
-    end
+    if card and updateReactionBadges then updateReactionBadges(card) end
     return true
 end
 
-local function refreshAllReactions()
-    if not Auth.idToken then return end
+local function fetchDMReactions(messageKey)
+    -- DMs use their own Firebase thread. If the DM project's rules do not
+    -- expose reactions, the action simply fails without affecting chat.
+    if not DMAuth.idToken or not activeDMUser or not messageKey then return false end
+    local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
+    local ok, data = requestJSON(
+        "GET",
+        dmAuthURL("/dmThreads/" .. urlEncode(thread) .. "/messages/" ..
+            urlEncode(messageKey) .. "/reactions", DMAuth.idToken)
+    )
+    if not ok then return false end
+    return true
+end
 
-    -- Only refresh cards currently near the visible viewport. This keeps the
-    -- reaction sync live without generating dozens of HTTP requests every tick.
-    local top = Scroll.AbsolutePosition.Y
-    local bottom = top + Scroll.AbsoluteWindowSize.Y
+toggleMyReaction = function(messageKey, reaction)
+    if not messageKey or not reaction then return false end
 
-    for _, card in ipairs(cards) do
-        if card and card.Gui and card.Gui.Parent then
-            local y = card.Gui.AbsolutePosition.Y
-            local h = card.Gui.AbsoluteSize.Y
-            if y + h >= top - 80 and y <= bottom + 80 then
-                task.spawn(function()
-                    fetchReactionsForMessage(card.Key)
-                end)
+    if activePopupIsDM then
+        if not DMAuth.idToken or not activeDMUser then return false end
+        local thread = dmThreadId(LocalPlayer.UserId, activeDMUser.Id)
+        local uid = tostring(LocalPlayer.UserId)
+        local endpoint = "/dmThreads/" .. urlEncode(thread) .. "/messages/" ..
+            urlEncode(messageKey) .. "/reactions/" .. urlEncode(uid)
+
+        -- Keep a tiny local state for immediate toggle behavior.
+        dmReactionLocal = dmReactionLocal or {}
+        dmReactionLocal[messageKey] = dmReactionLocal[messageKey] or {}
+        local current = dmReactionLocal[messageKey][uid]
+
+        if current == reaction then
+            local ok = requestJSON("DELETE", dmAuthURL(endpoint, DMAuth.idToken))
+            if ok then
+                dmReactionLocal[messageKey][uid] = nil
+                return true
             end
+            return false
         end
+
+        local ok = requestJSON("PUT", dmAuthURL(endpoint, DMAuth.idToken), reaction)
+        if ok then
+            dmReactionLocal[messageKey][uid] = reaction
+            return true
+        end
+        return false
     end
-end
 
--- Reaction picker: use cached Twemoji PNGs when the executor supports local assets.
--- This avoids relying on Roblox's font to render emoji glyphs.
-for i, reaction in ipairs(REACTIONS) do
-    local rb = new("ImageButton", {
-        BackgroundTransparency = 1,
-        AutoButtonColor = false,
-        Image = "",
-        ScaleType = Enum.ScaleType.Fit,
-        ZIndex = 105,
-    }, ReactionPanel)
-    rb.LayoutOrder = i
-
-    local fallback = new("TextLabel", {
-        BackgroundTransparency = 1,
-        Size = UDim2.fromScale(1, 1),
-        Font = Enum.Font.Gotham,
-        Text = reaction,
-        TextSize = 13,
-        TextColor3 = Color3.fromRGB(220, 220, 225),
-        ZIndex = 106,
-    }, rb)
-
-    rb.MouseButton1Click:Connect(function()
-        if not PopupShade.Visible or not activePopupMessage or not Auth.idToken or not Auth.uid then return end
-
-        local messageKey = activePopupMessage.key
-        -- Instagram-style toggle: tap the same reaction again to remove it.
-        if toggleMyReaction(messageKey, reaction) then
-            closePopup()
-        end
-    end)
-
-end
-
-function toggleMyReaction(messageKey, reaction)
-    if not Auth.idToken or not Auth.uid or not messageKey or not reaction then return false end
-
+    if not Auth.idToken or not Auth.uid then return false end
     local uid = tostring(Auth.uid)
-    local current = reactionState[messageKey] and reactionState[messageKey][uid]
-    local endpoint = "/servers/" .. urlEncode(game.JobId) .. "/reactions/" .. urlEncode(messageKey) .. "/" .. urlEncode(Auth.uid)
+    reactionState[messageKey] = reactionState[messageKey] or {}
+    local current = reactionState[messageKey][uid]
+    local endpoint = "/servers/" .. urlEncode(game.JobId) .. "/reactions/" ..
+        urlEncode(messageKey) .. "/" .. urlEncode(Auth.uid)
 
     if current == reaction then
         local ok = requestJSON("DELETE", authURL(endpoint, Auth.idToken))
         if ok then
-            reactionState[messageKey] = reactionState[messageKey] or {}
             reactionState[messageKey][uid] = nil
             local card = cardByKey[messageKey]
-            if card then updateReactionBadges(card) end
+            if card and updateReactionBadges then updateReactionBadges(card) end
             return true
         end
         return false
@@ -2462,47 +2523,50 @@ function toggleMyReaction(messageKey, reaction)
 
     local ok = requestJSON("PUT", authURL(endpoint, Auth.idToken), reaction)
     if ok then
-        setLocalReaction(messageKey, reaction)
+        reactionState[messageKey][uid] = reaction
+        local card = cardByKey[messageKey]
+        if card and updateReactionBadges then updateReactionBadges(card) end
         return true
     end
     return false
 end
 
-local reactionAssetsLoaded = false
-function loadReactionAssets()
-    if reactionAssetsLoaded then return end
-    reactionAssetsLoaded = true
-    task.spawn(function()
-        for _, child in ipairs(ReactionPanel:GetChildren()) do
-            if child:IsA("ImageButton") then
-                local index = child.LayoutOrder
-                local reaction = REACTIONS[index]
-                if reaction then
-                    local asset = cacheReactionAsset(reaction)
-                    if asset and child.Parent then
-                        child.Image = asset
-                        local fallback = child:FindFirstChildOfClass("TextLabel")
-                        if fallback then fallback.Visible = false end
-                    end
-                end
-                task.wait(0.035)
+local function refreshAllReactions()
+    if not Auth.idToken then return end
+    local top = Scroll.AbsolutePosition.Y
+    local bottom = top + Scroll.AbsoluteWindowSize.Y
+    for _, card in ipairs(cards) do
+        if card and card.Gui and card.Gui.Parent then
+            local y = card.Gui.AbsolutePosition.Y
+            local h = card.Gui.AbsoluteSize.Y
+            if y + h >= top - 80 and y <= bottom + 80 then
+                task.spawn(function() fetchServerReactions(card.Key) end)
             end
         end
-    end)
+    end
 end
 
-function closePopup()
+local function loadReactionAssets()
+    -- Reaction buttons cache their own Twemoji assets.
+end
+
+closePopup = function()
     PopupShade.Visible = false
     ReactionPanel.Visible = false
+    QuickReactionBar.Visible = true
+    PopupButtons.Visible = true
     activePopupMessage = nil
     activePopupIsDM = false
-    ReactAction.Visible = true
 end
 
 PopupShade.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        if input.Position.X < Popup.AbsolutePosition.X or input.Position.X > Popup.AbsolutePosition.X + Popup.AbsoluteSize.X
-            or input.Position.Y < Popup.AbsolutePosition.Y or input.Position.Y > Popup.AbsolutePosition.Y + Popup.AbsoluteSize.Y then
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        local p = input.Position
+        local q = Popup.AbsolutePosition
+        local z = Popup.AbsoluteSize
+        if not (p.X >= q.X and p.X <= q.X + z.X
+            and p.Y >= q.Y and p.Y <= q.Y + z.Y) then
             closePopup()
         end
     end
@@ -2515,117 +2579,52 @@ end)
 
 CopyAction.MouseButton1Click:Connect(function()
     if activePopupMessage then
-        copyText(activePopupMessage.type == "sticker" and "Sticker" or (activePopupMessage.message or ""))
+        copyText(activePopupMessage.type == "sticker" and "Sticker"
+            or tostring(activePopupMessage.message or ""))
+        CopyAction.Text = "COPIED"
+        task.delay(0.45, function()
+            if CopyAction.Parent then
+                CopyAction.Text = "COPY"
+                closePopup()
+            end
+        end)
     end
-    closePopup()
 end)
 
 ReactAction.MouseButton1Click:Connect(function()
     ReactionPanel.Visible = not ReactionPanel.Visible
-    if ReactionPanel.Visible then
-        loadReactionAssets()
+    QuickReactionBar.Visible = not ReactionPanel.Visible
+    if activePopupMessage then
+        if activePopupIsDM then
+            task.spawn(function() fetchDMReactions(activePopupMessage.key) end)
+        else
+            task.spawn(function() fetchServerReactions(activePopupMessage.key) end)
+        end
     end
 end)
 
 openMessagePopup = function(message, isDM)
+    if not message then return end
     activePopupMessage = message
     activePopupIsDM = isDM == true
-    PopupShade:SetAttribute("MessageKey", message.key)
-    PopupPreview.Text = tostring(message.type == "sticker" and "Sticker" or (message.message or ""))
-    ReactAction.Visible = not activePopupIsDM
-    ReactionPanel.Visible = not activePopupIsDM
+    PopupPreview.Text = message.type == "sticker"
+        and "Sticker"
+        or tostring(message.message or "")
+    ReactionPanel.Visible = false
+    QuickReactionBar.Visible = true
+    PopupButtons.Visible = true
     PopupShade.Visible = true
-    if not activePopupIsDM then
-        loadReactionAssets()
-        task.spawn(function()
-            fetchReactionsForMessage(message.key)
-        end)
-    end
-end
 
--- -----------------------------------------------------------------------------
--- DM-specific message actions. DMs use their own popup so they never depend on
--- the Server Chat reaction popup state.
--- -----------------------------------------------------------------------------
-local DMActionShade = new("TextButton", {
-    Name="DMActionShade", Visible=false, AutoButtonColor=false, Text="",
-    BackgroundColor3=Color3.fromRGB(0,0,0), BackgroundTransparency=0.38,
-    Size=UDim2.fromScale(1,1), ZIndex=300,
-}, ScreenGui)
-local DMActionBox = new("Frame", {
-    BackgroundColor3=Color3.fromRGB(13,13,15), BorderSizePixel=0,
-    AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(0.5,0.5),
-    Size=UDim2.fromOffset(286,150), ZIndex=301,
-}, DMActionShade)
-addCorner(DMActionBox,14)
-addStroke(DMActionBox,Color3.fromRGB(39,39,43),0.05,1)
-new("TextLabel", {
-    BackgroundTransparency=1, Position=UDim2.fromOffset(15,10),
-    Size=UDim2.new(1,-30,0,15), Font=Enum.Font.GothamBold,
-    Text="DM MESSAGE", TextColor3=Color3.fromRGB(45,161,235), TextSize=9,
-    TextXAlignment=Enum.TextXAlignment.Left, ZIndex=302,
-}, DMActionBox)
-local DMActionPreview = new("TextLabel", {
-    BackgroundTransparency=1, Position=UDim2.fromOffset(15,29),
-    Size=UDim2.new(1,-30,0,34), Font=Enum.Font.Gotham,
-    Text="", TextColor3=Color3.fromRGB(165,165,170), TextSize=10,
-    TextWrapped=true, TextXAlignment=Enum.TextXAlignment.Left,
-    TextYAlignment=Enum.TextYAlignment.Top, TextTruncate=Enum.TextTruncate.AtEnd,
-    ZIndex=302,
-}, DMActionBox)
-local DMActionButtons = new("Frame", {
-    BackgroundTransparency=1, Position=UDim2.fromOffset(12,76),
-    Size=UDim2.new(1,-24,0,42), ZIndex=302,
-}, DMActionBox)
-new("UIListLayout", {FillDirection=Enum.FillDirection.Horizontal,HorizontalAlignment=Enum.HorizontalAlignment.Center,Padding=UDim.new(0,7)}, DMActionButtons)
-local function dmActionButton(label)
-    local b=new("TextButton", {
-        BackgroundColor3=Color3.fromRGB(23,23,26), BorderSizePixel=0,
-        Size=UDim2.fromOffset(82,36), Font=Enum.Font.GothamBold,
-        Text=label, TextColor3=Color3.fromRGB(220,220,225), TextSize=9,
-        AutoButtonColor=false, ZIndex=303,
-    },DMActionButtons)
-    addCorner(b,9)
-    return b
-end
-local DMReplyButton=dmActionButton("REPLY")
-local DMCopyButton=dmActionButton("COPY")
-local DMCloseButton=dmActionButton("CLOSE")
-local activeDMActionMessage=nil
-local function closeDMActionPopup()
-    activeDMActionMessage=nil
-    DMActionShade.Visible=false
-end
-DMCloseButton.MouseButton1Click:Connect(closeDMActionPopup)
-DMActionShade.MouseButton1Click:Connect(function() closeDMActionPopup() end)
-DMActionBox.InputBegan:Connect(function(input)
-    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-        -- Keep clicks inside the box from closing it through the shade.
+    if activePopupIsDM then
+        task.spawn(function() fetchDMReactions(message.key) end)
+    else
+        task.spawn(function() fetchServerReactions(message.key) end)
     end
-end)
-DMReplyButton.MouseButton1Click:Connect(function()
-    local m=activeDMActionMessage
-    if m then setReply(m) end
-    closeDMActionPopup()
-end)
-DMCopyButton.MouseButton1Click:Connect(function()
-    local m=activeDMActionMessage
-    if m then copyText(m.type=="sticker" and "Sticker" or (m.message or "")) end
-    closeDMActionPopup()
-end)
-local oldOpenMessagePopup=openMessagePopup
-openMessagePopup=function(message,isDM)
-    if isDM then
-        activeDMActionMessage=message
-        DMActionPreview.Text=tostring(message.type=="sticker" and "Sticker" or (message.message or ""))
-        DMActionShade.Visible=true
-        return
-    end
-    return oldOpenMessagePopup(message,false)
 end
 
 -- -----------------------------------------------------------------------------
 -- Compact message renderer
+
 -- -----------------------------------------------------------------------------
 function updateReactionBadges(card)
     if not card or not card.ReactionFrame then return end
@@ -2900,8 +2899,9 @@ renderMessage = function(message)
             replyPreview = targetCard.Message
         else
             replyPreview = {
-                displayName = "Previous message",
-                message = "Message"
+                displayName = message.replyToDisplayName or "Previous message",
+                message = message.replyToText or "Message",
+                type = "text",
             }
         end
     end
@@ -3207,6 +3207,8 @@ local function sendMessage()
     }
     if replyKey then
         message.replyTo = replyKey
+        message.replyToText = tostring(replyPreviewText or "Message")
+        message.replyToDisplayName = tostring(replyDisplayName or "User")
     end
 
     -- Render immediately so sending never depends on the next Firebase poll.
@@ -3228,7 +3230,11 @@ local function sendMessage()
         message = message.message,
         timestamp = message.timestamp,
     }
-    if message.replyTo then payload.replyTo = message.replyTo end
+    if message.replyTo then
+        payload.replyTo = message.replyTo
+        payload.replyToText = message.replyToText
+        payload.replyToDisplayName = message.replyToDisplayName
+    end
 
     task.spawn(function()
         local ok, result = requestJSON(
