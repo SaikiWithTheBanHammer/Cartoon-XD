@@ -684,6 +684,22 @@ local DMLoadMessagesButton = new("TextButton", {
 addCorner(DMLoadMessagesButton, 999)
 addStroke(DMLoadMessagesButton, Color3.fromRGB(42, 42, 47), 0.05, 1)
 
+local DMLoadMessagesEmptyLabel = new("TextLabel", {
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.new(1, -50, 0, 32),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.Gotham,
+    Text = "Message History Auto Cleared or Empty",
+    TextColor3 = Color3.fromRGB(92, 92, 100),
+    TextSize = 9,
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    TextYAlignment = Enum.TextYAlignment.Center,
+    Visible = false,
+    ZIndex = 21,
+}, DMLoadMessagesOverlay)
+
 -- Composer.
 local Composer = new("Frame", {
     Name = "Composer",
@@ -1672,6 +1688,9 @@ local function makeDMRow(parent, candidate, compact)
         Input.Text=""
         Input.PlaceholderText=""
         dmLoadRequested = false
+        DMLoadMessagesButton.Visible = true
+        DMLoadMessagesButton.Text = "Load Messages"
+        DMLoadMessagesEmptyLabel.Visible = false
         DMLoadMessagesOverlay.Visible = true
         if not DMAuth.idToken then dmSignIn() end
     end)
@@ -2017,7 +2036,15 @@ loadDMMessages = function()
     end
 
     dmLoadRequested = true
-    DMLoadMessagesOverlay.Visible = false
+    if #list == 0 then
+        DMLoadMessagesButton.Visible = false
+        DMLoadMessagesEmptyLabel.Visible = true
+        DMLoadMessagesOverlay.Visible = true
+    else
+        DMLoadMessagesButton.Visible = false
+        DMLoadMessagesEmptyLabel.Visible = false
+        DMLoadMessagesOverlay.Visible = false
+    end
     return true
 end
 
@@ -2028,7 +2055,9 @@ DMLoadMessagesButton.MouseButton1Click:Connect(function()
     local ok = loadDMMessages()
     if not ok and activeDMUser then
         dmLoadRequested = false
+        DMLoadMessagesButton.Visible = true
         DMLoadMessagesButton.Text = "Load Messages"
+        DMLoadMessagesEmptyLabel.Visible = false
         DMLoadMessagesOverlay.Visible = true
     end
 end)
@@ -2234,7 +2263,9 @@ local function switchTab(tab)
             DMHeader.Visible=false
             DMConversation.Visible=false
             DMLoadMessagesOverlay.Visible=false
+            DMLoadMessagesButton.Visible=true
             DMLoadMessagesButton.Text="Load Messages"
+            DMLoadMessagesEmptyLabel.Visible=false
             dmLoadRequested=false
             DMSearch.Visible=true
             DMHome.Visible=true
