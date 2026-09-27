@@ -424,7 +424,7 @@ addCorner(TabSwitch, 999)
 addStroke(TabSwitch, Color3.fromRGB(65, 65, 72), 0.35, 1)
 
 local TabPopover = new("Frame", {
-    Name="TabPopover", Position=UDim2.fromOffset(8,43), Size=UDim2.fromOffset(116,126),
+    Name="TabPopover", Position=UDim2.fromOffset(8,43), Size=UDim2.fromOffset(116,82),
     BackgroundColor3=Color3.fromRGB(16,16,19), BorderSizePixel=0, Visible=false, ZIndex=80,
 }, Main)
 addCorner(TabPopover,12)
@@ -437,7 +437,6 @@ local function tabChoice(label,order)
 end
 local ChatChoice=tabChoice("CHAT",1)
 local DMChoice=tabChoice("DM",2)
-local SettingsChoice=tabChoice("SETTINGS",3)
 
 -- Anchor / Unanchor button, matching the Saiki Emotes behavior.
 local anchored = false
@@ -522,86 +521,67 @@ local DMRoot = new("Frame", {
 }, Main)
 
 
-local SettingsRoot=new("Frame",{
-    Name="SettingsRoot",Position=UDim2.fromOffset(12,49),Size=UDim2.new(1,-24,1,-103),
-    BackgroundTransparency=1,BorderSizePixel=0,Visible=false,
-},Main)
-new("TextLabel",{Position=UDim2.fromOffset(4,4),Size=UDim2.new(1,-8,0,20),BackgroundTransparency=1,Text="SETTINGS",TextColor3=Color3.fromRGB(155,155,162),TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},SettingsRoot)
-local CurrentThemeCard=new("Frame",{Position=UDim2.fromOffset(4,30),Size=UDim2.new(1,-8,0,62),BackgroundColor3=Color3.fromRGB(16,16,19),BorderSizePixel=0},SettingsRoot)
-addCorner(CurrentThemeCard,13)
-local CurrentThemeTitle=new("TextLabel",{Position=UDim2.fromOffset(12,8),Size=UDim2.new(1,-24,0,18),BackgroundTransparency=1,Text="Current theme",TextColor3=Color3.fromRGB(232,232,235),TextSize=11,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},CurrentThemeCard)
-local CurrentThemeValue=new("TextLabel",{Position=UDim2.fromOffset(12,29),Size=UDim2.new(1,-24,0,18),BackgroundTransparency=1,Text=currentThemeName,TextColor3=Color3.fromRGB(155,155,162),TextSize=9,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},CurrentThemeCard)
+local DMSearchShell = new("Frame", {
+    Name = "SearchShell",
+    Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.new(1, 0, 0, 38),
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    BorderSizePixel = 0,
+}, DMRoot)
+addCorner(DMSearchShell, 12)
+addStroke(DMSearchShell, Color3.fromRGB(34, 34, 38), 0.05, 1)
 
-local ThemeGrid=new("Frame",{Position=UDim2.fromOffset(4,98),Size=UDim2.new(1,-8,0,143),BackgroundTransparency=1,BorderSizePixel=0},SettingsRoot)
-new("UIGridLayout",{CellSize=UDim2.new(0.5,-4,0,44),CellPadding=UDim2.fromOffset(8,5),SortOrder=Enum.SortOrder.LayoutOrder},ThemeGrid)
-local ThemeButtons={}
-local themeOrder={"Midnight","Ultron","Softcore Pink","Lavender Dream","Cloud Blue","Pearl"}
-
-local function updateThemeButtons()
-    for name,b in pairs(ThemeButtons) do
-        local t=THEMES[name]
-        b.BackgroundColor3=t.surface2
-        b.TextColor3=t.text
-        local mark=b:FindFirstChild("Mark")
-        if mark then mark.Visible=(name==currentThemeName);mark.BackgroundColor3=t.accent end
-    end
-    CurrentThemeValue.Text=currentThemeName
-end
-
-local applyCleanTheme
-
-for i,name in ipairs(themeOrder) do
-    local t=THEMES[name]
-    local b=new("TextButton",{Name=name,LayoutOrder=i,BackgroundColor3=t.surface2,BorderSizePixel=0,Text=name,TextColor3=t.text,TextSize=9,Font=Enum.Font.GothamBold,AutoButtonColor=false},ThemeGrid)
-    addCorner(b,11)
-    local mark=new("Frame",{Name="Mark",AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,-9,0.5,0),Size=UDim2.fromOffset(9,9),BackgroundColor3=t.accent,BorderSizePixel=0,Visible=name==currentThemeName},b)
-    addCorner(mark,99)
-    ThemeButtons[name]=b
-    b.Activated:Connect(function() applyCleanTheme(name,true) end)
-end
-new("TextLabel",{Position=UDim2.fromOffset(4,242),Size=UDim2.new(1,-8,0,18),BackgroundColor3=Color3.fromRGB(16,16,19),BorderSizePixel=0,Text="Smooth themes • saved locally",TextColor3=Color3.fromRGB(155,155,162),TextSize=8,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Center,TextYAlignment=Enum.TextYAlignment.Center},SettingsRoot)
+local SearchIcon = new("Frame", {
+    Name = "SearchIcon", Position = UDim2.fromOffset(13, 10), Size = UDim2.fromOffset(14, 14),
+    BackgroundTransparency = 1, BorderSizePixel = 0,
+}, DMSearchShell)
+new("Frame", {
+    Position = UDim2.fromOffset(1, 1), Size = UDim2.fromOffset(9, 9),
+    BackgroundTransparency = 1, BorderSizePixel = 0,
+}, SearchIcon)
+local SearchRing = new("Frame", {
+    Position = UDim2.fromOffset(0, 0), Size = UDim2.fromOffset(10, 10),
+    BackgroundTransparency = 1, BorderSizePixel = 0,
+}, SearchIcon)
+addStroke(SearchRing, Color3.fromRGB(135, 135, 142), 0.05, 1.5)
+addCorner(SearchRing, 999)
+new("Frame", {
+    Position = UDim2.fromOffset(9, 9), Size = UDim2.fromOffset(5, 2),
+    Rotation = 45, BackgroundColor3 = Color3.fromRGB(135, 135, 142), BorderSizePixel = 0,
+}, SearchIcon)
 
 local DMSearch = new("TextBox", {
-    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
-    Position = UDim2.fromOffset(0, 0),
-    Size = UDim2.new(1, 0, 0, 36),
-    BorderSizePixel = 0,
-    ClearTextOnFocus = false,
-    Font = Enum.Font.Gotham,
-    Text = "",
-    PlaceholderText = "",
-    PlaceholderColor3 = Color3.fromRGB(78, 78, 83),
-    TextColor3 = Color3.fromRGB(232, 232, 235),
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, DMRoot)
-addCorner(DMSearch, 999)
-addStroke(DMSearch, Color3.fromRGB(30, 30, 33), 0.1, 1)
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(36, 0),
+    Size = UDim2.new(1, -72, 1, 0), BorderSizePixel = 0, ClearTextOnFocus = false,
+    Font = Enum.Font.Gotham, Text = "", PlaceholderText = "Search people...",
+    PlaceholderColor3 = Color3.fromRGB(92, 92, 98), TextColor3 = Color3.fromRGB(232, 232, 235),
+    TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
+}, DMSearchShell)
+
+local DMSearchClear = new("TextButton", {
+    BackgroundTransparency = 1, Position = UDim2.new(1, -34, 0, 5), Size = UDim2.fromOffset(28, 28),
+    Font = Enum.Font.GothamBold, Text = "×", TextColor3 = Color3.fromRGB(100,100,106),
+    TextSize = 15, AutoButtonColor = false, Visible = false,
+}, DMSearchShell)
 
 local DMHome = new("Frame", {
     Name = "DMHome",
-    Position = UDim2.fromOffset(0, 44),
-    Size = UDim2.new(1, 0, 1, -44),
+    Position = UDim2.fromOffset(0, 45),
+    Size = UDim2.new(1, 0, 1, -45),
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
 }, DMRoot)
 
 local DMServerPanel = new("Frame", {
-    Name = "ServerPanel",
-    Position = UDim2.fromOffset(0, 0),
-    Size = UDim2.new(0.5, -4, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
-    BorderSizePixel = 0,
+    Name = "ServerPanel", Position = UDim2.fromOffset(0, 0),
+    Size = UDim2.new(1, 0, 0, 116), BackgroundColor3 = Color3.fromRGB(10, 10, 12), BorderSizePixel = 0,
 }, DMHome)
 addCorner(DMServerPanel, 12)
 addStroke(DMServerPanel, Color3.fromRGB(28, 28, 32), 0.1, 1)
 
 local DMHistoryPanel = new("Frame", {
-    Name = "HistoryPanel",
-    Position = UDim2.new(0.5, 4, 0, 0),
-    Size = UDim2.new(0.5, -4, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(10, 10, 12),
-    BorderSizePixel = 0,
+    Name = "HistoryPanel", Position = UDim2.fromOffset(0, 124),
+    Size = UDim2.new(1, 0, 0, 116), BackgroundColor3 = Color3.fromRGB(10, 10, 12), BorderSizePixel = 0,
 }, DMHome)
 addCorner(DMHistoryPanel, 12)
 addStroke(DMHistoryPanel, Color3.fromRGB(28, 28, 32), 0.1, 1)
@@ -617,9 +597,11 @@ new("TextLabel", {
     Font = Enum.Font.GothamBold, Text = "HISTORY", TextColor3 = Color3.fromRGB(185, 185, 190), TextSize = 8,
     TextXAlignment = Enum.TextXAlignment.Left,
 }, DMHistoryPanel)
+new("TextLabel", { BackgroundTransparency=1, Position=UDim2.fromOffset(72,7), Size=UDim2.new(1,-84,0,16), Font=Enum.Font.Gotham, Text="People currently in this server", TextColor3=Color3.fromRGB(82,82,88), TextSize=7, TextXAlignment=Enum.TextXAlignment.Right }, DMServerPanel)
+new("TextLabel", { BackgroundTransparency=1, Position=UDim2.fromOffset(72,7), Size=UDim2.new(1,-84,0,16), Font=Enum.Font.Gotham, Text="Your recent conversations", TextColor3=Color3.fromRGB(82,82,88), TextSize=7, TextXAlignment=Enum.TextXAlignment.Right }, DMHistoryPanel)
 
 local DMServerList = new("ScrollingFrame", {
-    Name = "ServerList", Position = UDim2.fromOffset(6, 28), Size = UDim2.new(1, -12, 1, -34),
+    Name = "ServerList", Position = UDim2.fromOffset(7, 27), Size = UDim2.new(1, -14, 0, 82),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -627,7 +609,7 @@ local DMServerList = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, DMServerList)
 
 local DMHistoryList = new("ScrollingFrame", {
-    Name = "HistoryList", Position = UDim2.fromOffset(6, 28), Size = UDim2.new(1, -12, 1, -34),
+    Name = "HistoryList", Position = UDim2.fromOffset(7, 27), Size = UDim2.new(1, -14, 0, 82),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -635,7 +617,7 @@ local DMHistoryList = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, DMHistoryList)
 
 local DMResults = new("ScrollingFrame", {
-    Name = "SearchResults", Position = UDim2.fromOffset(0, 44), Size = UDim2.new(1, 0, 1, -44),
+    Name = "SearchResults", Position = UDim2.fromOffset(0, 45), Size = UDim2.new(1, 0, 1, -45),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
@@ -1617,57 +1599,104 @@ local function makeDMRow(parent, candidate, compact)
     return row
 end
 
+local function dmSearchScore(candidate, q)
+    local name = string.lower(tostring(candidate.DisplayName or ""))
+    local username = string.lower(tostring(candidate.Username or ""))
+    if q == "" then return 0 end
+    local score = -1
+    if name == q or username == q then score = 1000
+    elseif name:sub(1,#q) == q or username:sub(1,#q) == q then score = 800
+    elseif string.find(name,q,1,true) or string.find(username,q,1,true) then score = 650
+    else
+        local words = {}
+        for w in q:gmatch("%w+") do words[#words+1]=w end
+        for _,w in ipairs(words) do
+            if #w >= 2 and (string.find(name,w,1,true) or string.find(username,w,1,true)) then score = math.max(score, 420) end
+        end
+        -- Small typo tolerance: compare the query with display-name/username prefixes.
+        local function distance(a,b)
+            local la,lb=#a,#b
+            if la>24 or lb>24 then return 99 end
+            local prev={}
+            for j=0,lb do prev[j]=j end
+            for i=1,la do
+                local cur={[0]=i}
+                for j=1,lb do
+                    local cost=(a:sub(i,i)==b:sub(j,j)) and 0 or 1
+                    cur[j]=math.min(cur[j-1]+1,prev[j]+1,prev[j-1]+cost)
+                end
+                prev=cur
+            end
+            return prev[lb]
+        end
+        local d1=distance(q,name:sub(1,math.min(#name,math.max(#q,1))))
+        local d2=distance(q,username:sub(1,math.min(#username,math.max(#q,1))))
+        local d=math.min(d1,d2)
+        if d <= math.max(1,math.floor(#q/4)) then score=260 end
+    end
+    return score
+end
+
+local function addDMSectionLabel(parent, text, y)
+    new("TextLabel", { BackgroundTransparency=1, Position=UDim2.fromOffset(5,y), Size=UDim2.new(1,-10,0,18), Font=Enum.Font.GothamBold, Text=text, TextColor3=Color3.fromRGB(150,150,156), TextSize=8, TextXAlignment=Enum.TextXAlignment.Left }, parent)
+end
+
 local function renderDMResults()
-    clearList(DMResults)
-    clearList(DMServerList)
-    clearList(DMHistoryList)
+    clearList(DMResults); clearList(DMServerList); clearList(DMHistoryList)
     if activeDMUser then return end
 
     local q = string.lower(tostring(DMSearch.Text or "")):gsub("^%s+", ""):gsub("%s+$", "")
+    DMSearchClear.Visible = q ~= ""
+
     if q ~= "" then
-        DMHome.Visible=false
-        DMResults.Visible=true
-        local list = {}
+        DMHome.Visible=false; DMResults.Visible=true
+        local ranked={}
         for _, candidate in pairs(dmCandidates) do
-            local name = string.lower(candidate.DisplayName or "")
-            local username = string.lower(candidate.Username or "")
-            if string.find(name, q, 1, true) or string.find(username, q, 1, true) then
-                table.insert(list, candidate)
+            local score=dmSearchScore(candidate,q)
+            if score >= 0 then table.insert(ranked,{candidate=candidate,score=score}) end
+        end
+        table.sort(ranked,function(a,b)
+            if a.score~=b.score then return a.score>b.score end
+            local ad=string.lower(a.candidate.DisplayName or "")
+            local bd=string.lower(b.candidate.DisplayName or "")
+            return ad<bd
+        end)
+        local exactCount=0
+        for _,r in ipairs(ranked) do if r.score>=420 then exactCount+=1 end end
+        local shown=0
+        local exactLabel=new("TextLabel",{BackgroundTransparency=1,Size=UDim2.new(1,0,0,20),Font=Enum.Font.GothamBold,Text="RESULTS",TextColor3=Color3.fromRGB(150,150,156),TextSize=8,TextXAlignment=Enum.TextXAlignment.Left},DMResults)
+        local pad=new("UIPadding",{PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingTop=UDim.new(0,2)},exactLabel)
+        for _,r in ipairs(ranked) do
+            if r.score>=420 and shown<12 then makeDMRow(DMResults,r.candidate,false); shown+=1 end
+        end
+        local similar=0
+        for _,r in ipairs(ranked) do
+            if r.score<420 and r.score>=0 and similar<5 then
+                if similar==0 then
+                    new("TextLabel",{BackgroundTransparency=1,Size=UDim2.new(1,0,0,20),Font=Enum.Font.GothamBold,Text="SIMILAR",TextColor3=Color3.fromRGB(112,112,120),TextSize=8,TextXAlignment=Enum.TextXAlignment.Left},DMResults)
+                end
+                makeDMRow(DMResults,r.candidate,false); similar+=1
             end
         end
-        table.sort(list, function(a,b)
-            local ad, bd = string.lower(a.DisplayName or ""), string.lower(b.DisplayName or "")
-            return ad == bd and string.lower(a.Username or "") < string.lower(b.Username or "") or ad < bd
-        end)
-        for _, candidate in ipairs(list) do makeDMRow(DMResults, candidate, false) end
-        if #list == 0 then
-            new("TextLabel", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,30), Font=Enum.Font.Gotham, Text="No matching friends or players", TextColor3=Color3.fromRGB(78,78,83), TextSize=8, TextXAlignment=Enum.TextXAlignment.Center}, DMResults)
+        if shown==0 and similar==0 then
+            new("TextLabel",{BackgroundTransparency=1,Size=UDim2.new(1,0,0,42),Font=Enum.Font.Gotham,Text="No people found\nTry a display name or username",TextColor3=Color3.fromRGB(82,82,88),TextSize=8,TextXAlignment=Enum.TextXAlignment.Center,TextYAlignment=Enum.TextYAlignment.Center},DMResults)
         end
         return
     end
 
-    DMHome.Visible=true
-    DMResults.Visible=false
+    DMHome.Visible=true; DMResults.Visible=false
     local serverList={}
-    for _, candidate in pairs(dmCandidates) do
-        if candidate.Source == "Server" then table.insert(serverList, candidate) end
+    for _,candidate in pairs(dmCandidates) do if candidate.Source=="Server" then table.insert(serverList,candidate) end end
+    table.sort(serverList,function(a,b) return string.lower(a.DisplayName or "") < string.lower(b.DisplayName or "") end)
+    for _,candidate in ipairs(serverList) do makeDMRow(DMServerList,candidate,true) end
+    if #serverList==0 then
+        new("TextLabel",{BackgroundTransparency=1,Size=UDim2.new(1,0,0,34),Font=Enum.Font.Gotham,Text="No one else in this server",TextColor3=Color3.fromRGB(78,78,83),TextSize=8,TextXAlignment=Enum.TextXAlignment.Center,TextYAlignment=Enum.TextYAlignment.Center},DMServerList)
     end
-    table.sort(serverList, function(a,b) return string.lower(a.DisplayName or "") < string.lower(b.DisplayName or "") end)
-    for _, candidate in ipairs(serverList) do makeDMRow(DMServerList, candidate, true) end
-    if #serverList == 0 then
-        new("TextLabel", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,30), Font=Enum.Font.Gotham, Text="No one else in this server", TextColor3=Color3.fromRGB(78,78,83), TextSize=8, TextXAlignment=Enum.TextXAlignment.Center}, DMServerList)
+    for _,entry in ipairs(dmHistory) do
+        makeDMRow(DMHistoryList,{Id=entry.Id,Username=entry.Username,DisplayName=entry.DisplayName,HasIncoming=entry.HasIncoming==true},true)
     end
-
-    for _, entry in ipairs(dmHistory) do
-        makeDMRow(DMHistoryList, {
-            Id=entry.Id,
-            Username=entry.Username,
-            DisplayName=entry.DisplayName,
-            HasIncoming=entry.HasIncoming == true,
-        }, true)
-    end
-    if #dmHistory == 0 then
-        new("TextLabel", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,30), Font=Enum.Font.Gotham, Text="No DMs yet", TextColor3=Color3.fromRGB(78,78,83), TextSize=8, TextXAlignment=Enum.TextXAlignment.Center}, DMHistoryList)
+    if #dmHistory==0 then
+        new("TextLabel",{BackgroundTransparency=1,Size=UDim2.new(1,0,0,34),Font=Enum.Font.Gotham,Text="No recent conversations yet",TextColor3=Color3.fromRGB(78,78,83),TextSize=8,TextXAlignment=Enum.TextXAlignment.Center,TextYAlignment=Enum.TextYAlignment.Center},DMHistoryList)
     end
 end
 
@@ -2070,6 +2099,7 @@ end
 
 local function closeDMConversation()
     activeDMUser=nil
+    DMSearch.Text=""
     DMHeader.Visible=false; DMConversation.Visible=false; DMSearch.Visible=true; DMHome.Visible=true; DMResults.Visible=false
     Composer.Visible=false
     StickerOpen.Visible=false
@@ -2082,19 +2112,10 @@ end
 local function switchTab(tab)
     activeTab=tab
     local dm=tab=="dm"
-    local settings=tab=="settings"
-    Scroll.Visible=not dm and not settings
+    Scroll.Visible=not dm
     DMRoot.Visible=dm
-    SettingsRoot.Visible=settings
-    Composer.Visible=not settings and (not dm or activeDMUser~=nil)
-    StickerOpen.Visible=(not dm and not settings) or activeDMUser~=nil
-    if settings then
-        Input.Text=""
-        TabSwitch.Text="SW"
-        TabPopover.Visible=false
-        updateThemeButtons()
-        return
-    end
+    Composer.Visible=not dm or activeDMUser~=nil
+    StickerOpen.Visible=not dm or activeDMUser~=nil
     TabSwitch.Text=dm and "CHAT" or "DM"
     if dm then
         clearReply();Input.Text="";Composer.Visible=activeDMUser~=nil;StickerOpen.Visible=activeDMUser~=nil;Input.PlaceholderText=""
@@ -2106,12 +2127,12 @@ local function switchTab(tab)
 end
 DMBack.MouseButton1Click:Connect(closeDMConversation)
 DMSearch:GetPropertyChangedSignal("Text"):Connect(function() if activeTab=="dm" and not activeDMUser then renderDMResults() end end)
+DMSearchClear.Activated:Connect(function() DMSearch.Text=""; DMSearch:CaptureFocus() end)
 Players.PlayerAdded:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
 Players.PlayerRemoving:Connect(function() if activeTab=="dm" and not activeDMUser then loadDMCandidates() end end)
 TabSwitch.Activated:Connect(function()TabPopover.Visible=not TabPopover.Visible end)
 ChatChoice.Activated:Connect(function()switchTab("server");TabPopover.Visible=false end)
 DMChoice.Activated:Connect(function()switchTab("dm");TabPopover.Visible=false end)
-SettingsChoice.Activated:Connect(function()switchTab("settings");TabPopover.Visible=false end)
 UserInputService.InputBegan:Connect(function(input)
     if input.UserInputType==Enum.UserInputType.MouseButton1 and TabPopover.Visible then
         local p=input.Position;local q=TabPopover.AbsolutePosition;local z=TabPopover.AbsoluteSize
@@ -3292,37 +3313,9 @@ getgenv().SaikiRechat = {
 }
 
 applyCleanTheme = function(name,animate)
-    local t=THEMES[name]
-    if not t then return end
-    currentThemeName=name
-    local function set(obj,prop,value)
-        if not obj then return end
-        if animate then tween(obj,{[prop]=value},0.20) else obj[prop]=value end
-    end
-    set(Main,"BackgroundColor3",t.bg)
-    set(TabSwitch,"BackgroundColor3",t.surface)
-    set(TabPopover,"BackgroundColor3",t.surface)
-    set(Composer,"BackgroundColor3",t.surface)
-    set(Input,"TextColor3",t.text)
-    set(Input,"PlaceholderColor3",t.muted)
-    set(Scroll,"ScrollBarImageColor3",t.border)
-    set(DMSearch,"BackgroundColor3",t.surface)
-    set(DMSearch,"TextColor3",t.text)
-    set(DMSearch,"PlaceholderColor3",t.muted)
-    set(DMServerPanel,"BackgroundColor3",t.surface)
-    set(DMHistoryPanel,"BackgroundColor3",t.surface)
-    set(DMHeader,"BackgroundColor3",t.surface)
-    set(DMConversation,"ScrollBarImageColor3",t.border)
-    set(DMServerList,"ScrollBarImageColor3",t.border)
-    set(DMHistoryList,"ScrollBarImageColor3",t.border)
-    set(DMResults,"ScrollBarImageColor3",t.border)
-    set(CurrentThemeCard,"BackgroundColor3",t.surface)
-    set(CurrentThemeTitle,"TextColor3",t.text)
-    set(CurrentThemeValue,"TextColor3",t.muted)
-    set(AnchorCircle,"BackgroundColor3",t.surface)
-    updateThemeButtons()
-    saveThemeName(name)
+    -- Theme selection was removed from the UI. Keep this no-op for compatibility
+    -- with the existing theme data without creating a Settings tab.
+    if THEMES[name] then currentThemeName=name end
 end
 
-pcall(function()applyCleanTheme(currentThemeName,false)end)
-print("[Saiki Rechat v19] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v20] Loaded | Server: " .. tostring(game.JobId))
