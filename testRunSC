@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v17
+    SAIKI RECHAT v17.1
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -28,7 +28,7 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
 local GUI_NAME = "SaikiRechat"
-local MAIN_W, MAIN_H = 445, 359
+local MAIN_W, MAIN_H = 425, 359
 local POLL_RATE = 1.5
 local SLOW_MODE = 5
 local MAX_CARDS = 50
@@ -326,11 +326,11 @@ end
 -- -----------------------------------------------------------------------------
 local THEMES = {
     Midnight = {
-        Background = CurrentTheme.Background, Surface = CurrentTheme.Surface,
-        Surface2 = Color3.fromRGB(20, 20, 23), BubbleMine = CurrentTheme.BubbleMine,
-        BubbleOther = CurrentTheme.BubbleOther, Text = Color3.fromRGB(232, 232, 235),
+        Background = Color3.fromRGB(10, 10, 12), Surface = Color3.fromRGB(16, 16, 19),
+        Surface2 = Color3.fromRGB(20, 20, 23), BubbleMine = Color3.fromRGB(31, 31, 34),
+        BubbleOther = Color3.fromRGB(20, 20, 22), Text = Color3.fromRGB(232, 232, 235),
         Muted = Color3.fromRGB(155, 155, 162), Border = Color3.fromRGB(42, 42, 45),
-        Accent = CurrentTheme.Accent,
+        Accent = Color3.fromRGB(210, 60, 80),
     },
     Ultron = {
         Background = Color3.fromRGB(7, 5, 6), Surface = Color3.fromRGB(16, 11, 13),
@@ -3506,4 +3506,4 @@ getgenv().SaikiRechat = {
 themeTagTree(Main)
 applyTheme(CURRENT_THEME_NAME, true)
 
-print("[Saiki Rechat v17] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v17.1] Loaded | Server: " .. tostring(game.JobId))
