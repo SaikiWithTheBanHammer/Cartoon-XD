@@ -2310,7 +2310,7 @@ local PopupShade = new("Frame", {
 
 local Popup = new("Frame", {
     Name = "InstagramMessageActions",
-    Size = UDim2.fromOffset(338, 300),
+    Size = UDim2.fromOffset(338, 316),
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
     BackgroundColor3 = Color3.fromRGB(19, 19, 22),
@@ -2346,7 +2346,7 @@ local PopupPreviewCard = new("Frame", {
     BackgroundColor3 = Color3.fromRGB(28, 28, 32),
     BorderSizePixel = 0,
     Position = UDim2.fromOffset(12, 39),
-    Size = UDim2.new(1, -24, 0, 52),
+    Size = UDim2.new(1, -24, 0, 68),
     ZIndex = 302,
 }, Popup)
 addCorner(PopupPreviewCard, 11)
@@ -2366,7 +2366,7 @@ local PopupSender = new("TextLabel", {
 local PopupPreview = new("TextLabel", {
     BackgroundTransparency = 1,
     Position = UDim2.fromOffset(10, 20),
-    Size = UDim2.new(1, -20, 0, 25),
+    Size = UDim2.new(1, -20, 0, 42),
     Font = Enum.Font.Gotham,
     Text = "",
     TextColor3 = Color3.fromRGB(226, 226, 231),
@@ -2374,13 +2374,13 @@ local PopupPreview = new("TextLabel", {
     TextWrapped = true,
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Top,
-    TextTruncate = Enum.TextTruncate.AtEnd,
+    TextTruncate = Enum.TextTruncate.None,
     ZIndex = 303,
 }, PopupPreviewCard)
 
 new("TextLabel", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(14, 98),
+    Position = UDim2.fromOffset(14, 114),
     Size = UDim2.new(1, -28, 0, 13),
     Font = Enum.Font.GothamBold,
     Text = "Quick reactions",
@@ -2393,7 +2393,7 @@ new("TextLabel", {
 local QuickReactionBar = new("Frame", {
     BackgroundColor3 = Color3.fromRGB(27, 27, 31),
     BorderSizePixel = 0,
-    Position = UDim2.fromOffset(12, 112),
+    Position = UDim2.fromOffset(12, 128),
     Size = UDim2.new(1, -24, 0, 38),
     ZIndex = 302,
 }, Popup)
@@ -2457,7 +2457,7 @@ end
 
 local PopupButtons = new("Frame", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(12, 157),
+    Position = UDim2.fromOffset(12, 173),
     Size = UDim2.new(1, -24, 0, 42),
     ZIndex = 302,
 }, Popup)
@@ -2511,7 +2511,7 @@ local ReactAction = popupButton("REACTIONS", "Choose any reaction")
 
 new("TextLabel", {
     BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(14, 204),
+    Position = UDim2.fromOffset(14, 220),
     Size = UDim2.new(1, -28, 0, 13),
     Font = Enum.Font.GothamBold,
     Text = "All reactions",
@@ -2525,7 +2525,7 @@ local ReactionPanel = new("Frame", {
     Visible = true,
     BackgroundColor3 = Color3.fromRGB(25, 25, 29),
     BorderSizePixel = 0,
-    Position = UDim2.fromOffset(12, 219),
+    Position = UDim2.fromOffset(12, 235),
     Size = UDim2.new(1, -24, 0, 68),
     ZIndex = 306,
 }, Popup)
@@ -2744,6 +2744,9 @@ end)
 
 openMessagePopup = function(message, isDM)
     if not message then return end
+    -- The preview gets enough height for wrapped words instead of truncating
+    -- the final word at the right edge.
+    PopupPreview.TextTruncate = Enum.TextTruncate.None
     activePopupMessage = message
     activePopupIsDM = isDM == true
     PopupPreview.Text = message.type == "sticker"
@@ -3040,7 +3043,7 @@ renderMessage = function(message)
         local wrapped = TextService:GetTextSize(
             bodyText, textSize, font, Vector2.new(actualTextWidth, 10000)
         )
-        bodyHeight = math.max(textLineHeight, math.ceil(wrapped.Y))
+        bodyHeight = math.max(textLineHeight, math.ceil(wrapped.Y) + 2)
     end
 
     -- Reply target. Prefer the rendered target; if it has already scrolled
