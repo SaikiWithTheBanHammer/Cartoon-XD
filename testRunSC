@@ -136,7 +136,7 @@ local function requestJSON(method, url, body, contentType)
     if raw ~= "" then
         pcall(function() decoded = HttpService:JSONDecode(raw) end)
     end
-    return status >= 200 and status < 300, decoded, raw, status
+    return status >= 200 and status < 300, decoded, raw
 end
 
 local function urlEncode(value)
@@ -249,8 +249,8 @@ end
 
 firebaseSignIn()
 
--- Profile/follow Firebase is authenticated lazily. It must never block the
--- main chat GUI from loading.
+-- Profile/follow Firebase is authenticated only when a profile is opened.
+-- No profile network request is performed during script startup.
 local ProfileAuth = {uid=nil, idToken=nil, refreshToken=nil}
 local function profileAuthURL(path, token, extra)
     local url = PROFILE_FIREBASE_DB .. path .. ".json?auth=" .. urlEncode(token or "")
@@ -259,31 +259,11 @@ local function profileAuthURL(path, token, extra)
 end
 local function profileFirebaseSignIn()
     if ProfileAuth.idToken then return true end
-    local ok, data = requestJSON(
-        "POST",
-        "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. urlEncode(PROFILE_FIREBASE_API_KEY),
-        {returnSecureToken=true}
-    )
-    if ok and type(data)=="table" and data.localId and data.idToken then
-        ProfileAuth.uid=data.localId
-        ProfileAuth.idToken=data.idToken
-        ProfileAuth.refreshToken=data.refreshToken
-        return true
-    end
-    return false
-end
-local function refreshProfileFirebaseToken()
-    if not ProfileAuth.refreshToken then return false end
-    local body="grant_type=refresh_token&refresh_token="..urlEncode(ProfileAuth.refreshToken)
-    local ok,data=requestJSON(
-        "POST",
-        "https://securetoken.googleapis.com/v1/token?key="..urlEncode(PROFILE_FIREBASE_API_KEY),
-        body,
-        "application/x-www-form-urlencoded"
-    )
-    if ok and data and data.id_token then
-        ProfileAuth.idToken=data.id_token
-        ProfileAuth.refreshToken=data.refresh_token or ProfileAuth.refreshToken
+    local ok, data = requestJSON("POST", "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. urlEncode(PROFILE_FIREBASE_API_KEY), {returnSecureToken=true})
+    if ok and type(data) == "table" and data.localId and data.idToken then
+        ProfileAuth.uid = data.localId
+        ProfileAuth.idToken = data.idToken
+        ProfileAuth.refreshToken = data.refreshToken
         return true
     end
     return false
@@ -294,28 +274,6 @@ local profile = {
     username = LocalPlayer.Name,
     displayName = LocalPlayer.DisplayName,
 }
-
-local function saveProfile()
-    if not profileFirebaseSignIn() then return false end
-    profile.firebaseUid = ProfileAuth.uid
-    profile.updatedAt = os.time()
-    local ok = requestJSON(
-        "PUT",
-        profileAuthURL("/profiles/" .. urlEncode(profile.robloxUserId), ProfileAuth.idToken),
-        profile
-    )
-    if not ok and refreshProfileFirebaseToken() then
-        ok = requestJSON(
-            "PUT",
-            profileAuthURL("/profiles/" .. urlEncode(profile.robloxUserId), ProfileAuth.idToken),
-            profile
-        )
-    end
-    return ok == true
-end
-task.spawn(function()
-    pcall(saveProfile)
-end)
 
 -- Separate Firebase project/authentication for Direct Messages. Server Chat
 -- continues using the original Saiki Rechat Firebase project unchanged.
