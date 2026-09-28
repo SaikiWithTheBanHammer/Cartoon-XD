@@ -576,34 +576,66 @@ local function profileURL(path, extra)
     return profileAuthURL(path, ProfileAuth.idToken, extra)
 end
 
+-- Profile identity is now taken directly from Roblox, not from Firebase.
+-- Firebase is used only for follow relationships and counters.
+local function fetchRobloxIdentity(userId)
+    local player = Players:GetPlayerByUserId(tonumber(userId) or 0)
+    if player then
+        return player.Name, player.DisplayName
+    end
+
+    local ok, data = requestJSON("GET", "https://users.roblox.com/v1/users/" .. urlEncode(userId))
+    if ok and type(data) == "table" and data.name then
+        return tostring(data.name), tostring(data.displayName or data.name)
+    end
+    return nil, nil
+end
+
 local function fetchProfileData(userId)
     local key = tostring(userId)
     if profileCache[key] then return profileCache[key] end
     if not profileFirebaseSignIn() then return nil, "Profile service unavailable" end
 
-    local okP, p = requestJSON("GET", profileURL("/profiles/" .. urlEncode(key)))
-    local okF, f = requestJSON("GET", profileURL("/followers/" .. urlEncode(key)))
-    -- Following is stored under the viewer's Firebase profile UID, not Roblox UserId.
-    local okG, g = requestJSON("GET", profileURL("/following/" .. urlEncode(ProfileAuth.uid)))
-    local followers = type(f) == "table" and 0 or 0
-    local following = type(g) == "table" and 0 or 0
-    if type(f) == "table" then for _ in pairs(f) do followers += 1 end end
-    if type(g) == "table" then for _ in pairs(g) do following += 1 end end
+    local username, displayName = fetchRobloxIdentity(userId)
+    if not username then
+        return nil, "Could not retrieve Roblox profile"
+    end
 
-    local data = type(p) == "table" and p or {}
-    local player = Players:GetPlayerByUserId(tonumber(userId) or 0)
+    local myUid = tostring(ProfileAuth.uid)
+    local ownFollowingURL = profileURL("/follows/" .. urlEncode(myUid))
+    local okFollowing, followingData = requestJSON("GET", ownFollowingURL)
+    local followingCount = 0
+    local isFollowing = false
+
+    if okFollowing and type(followingData) == "table" then
+        for targetId in pairs(followingData) do
+            followingCount += 1
+            if tostring(targetId) == key then
+                isFollowing = true
+            end
+        end
+    end
+
+    -- Followers are queried from the single canonical /follows tree.
+    -- Each relationship is stored under the follower's own Firebase UID.
+    local okFollowers, followersData = requestJSON(
+        "GET",
+        PROFILE_FIREBASE_DB .. "/follows.json?auth=" .. urlEncode(ProfileAuth.idToken)
+            .. "&orderBy=%22targetRobloxUserId%22&equalTo=%22" .. urlEncode(key) .. "%22"
+    )
+    local followers = 0
+    if okFollowers and type(followersData) == "table" then
+        for _ in pairs(followersData) do followers += 1 end
+    end
+
     local result = {
         robloxUserId = tonumber(userId),
-        username = tostring(data.username or (player and player.Name) or "Unknown"),
-        displayName = tostring(data.displayName or (player and player.DisplayName) or "Unknown"),
-        followers = followers, following = following,
-        firebaseUid = tostring(data.firebaseUid or ""),
+        username = username,
+        displayName = displayName,
+        followers = followers,
+        following = followingCount,
+        followingMe = isFollowing,
     }
-    local me = tostring(ProfileAuth.uid or "")
-    if me ~= "" and tonumber(userId) ~= LocalPlayer.UserId then
-        local okRel, rel = requestJSON("GET", profileURL("/followers/" .. urlEncode(key) .. "/" .. urlEncode(me)))
-        result.followingMe = okRel and rel ~= nil
-    end
     profileCache[key] = result
     return result
 end
@@ -649,7 +681,7 @@ openProfile = function(userId, username, displayName)
     ProfileProgress.Size = UDim2.fromScale(0, 1)
     ProfileAvatar.Image = getAvatar(userId)
     if userId == LocalPlayer.UserId then
-        refreshProfileUI({robloxUserId=userId,username=LocalPlayer.Name,displayName=LocalPlayer.DisplayName,followers=0,following=0})
+        refreshProfileUI({robloxUserId=userId,username=LocalPlayer.Name,displayName=LocalPlayer.DisplayName,followers=0,following=0,followingMe=false})
     end
     task.spawn(function()
         if profileBusy then return end
@@ -678,40 +710,44 @@ ProfileFollow.Activated:Connect(function()
     end
     local data = profileCache[tostring(profileTarget.Id)]
     if not data or profileBusy then return end
+
     profileBusy = true
     local me = tostring(ProfileAuth.uid)
     local target = tostring(profileTarget.Id)
     local following = data.followingMe == true
-    local ok = true
+    local followPath = profileURL("/follows/" .. urlEncode(me) .. "/" .. urlEncode(target))
+    local ok, _, raw, status
+
     if following then
-        ok = requestJSON("DELETE", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me))) and ok
-        ok = requestJSON("DELETE", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target))) and ok
-        if ok then data.followingMe=false; data.followers=math.max(0,data.followers-1) end
-    else
-        local stamp = os.time()
-        local followerRecord = {firebaseUid=me,robloxUserId=LocalPlayer.UserId,username=LocalPlayer.Name,displayName=LocalPlayer.DisplayName,createdAt=stamp}
-        local followingRecord = {robloxUserId=tonumber(target),username=data.username,displayName=data.displayName,createdAt=stamp}
-        local okFollower, _, followerRaw, followerStatus = requestJSON("PUT", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me)), followerRecord)
-        local okFollowing, _, followingRaw, followingStatus = requestJSON("PUT", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target)), followingRecord)
-        ok = okFollower and okFollowing
-        if not ok then
-            -- Roll back a partial follower write so the relationship cannot become half-saved.
-            if okFollower and not okFollowing then
-                requestJSON("DELETE", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me)))
-            elseif okFollowing and not okFollower then
-                requestJSON("DELETE", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target)))
-            end
-            local detail = (not okFollower and tostring(followerRaw or "")) or (not okFollowing and tostring(followingRaw or "")) or ""
-            local status = (not okFollower and followerStatus) or (not okFollowing and followingStatus) or 0
-            local reason = detail
-            local decodedReason = detail:match('"error"%s*:%s*"([^"]+)"')
-            if decodedReason then reason = decodedReason end
-            if reason == "" then reason = "HTTP " .. tostring(status) end
-            ProfileStatus.Text = "Follow failed: " .. reason
+        ok, _, raw, status = requestJSON("DELETE", followPath)
+        if ok then
+            data.followingMe = false
+            data.followers = math.max(0, data.followers - 1)
         end
-        if ok then data.followingMe=true; data.followers += 1 end
+    else
+        local record = {
+            targetRobloxUserId = tonumber(target),
+            targetUsername = data.username,
+            targetDisplayName = data.displayName,
+            createdAt = os.time(),
+        }
+        ok, _, raw, status = requestJSON("PUT", followPath, record)
+        if ok then
+            data.followingMe = true
+            data.followers += 1
+        end
     end
-    if ok then refreshProfileUI(data) end
+
+    if ok then
+        profileCache[tostring(profileTarget.Id)] = data
+        refreshProfileUI(data)
+    else
+        local reason = tostring(raw or "")
+        local decodedReason = reason:match('"error"%s*:%s*"([^"]+)"')
+        if decodedReason then reason = decodedReason end
+        if reason == "" then reason = "HTTP " .. tostring(status or 0) end
+        ProfileStatus.Text = "Follow failed: " .. reason
+    end
     profileBusy = false
 end)
 
