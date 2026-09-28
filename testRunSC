@@ -1,5 +1,5 @@
 --[[
-    SAIKI RECHAT v22
+    SAIKI RECHAT v28
     Compact server-chat UI with Instagram/WhatsApp-style pill bubbles.
 
     Key changes from v1:
@@ -39,9 +39,15 @@ local dmCandidates = {}
 local dmHistory = {}
 local dmSeen = {}
 local getAvatar
+local openProfile
+local switchTab
 
 local FIREBASE_DB = "https://sxkicxat-default-rtdb.asia-southeast1.firebasedatabase.app"
 local FIREBASE_API_KEY = "AIzaSyCgvkvar8qhD3zqYC83BW6GHxGQVYoDhrM"
+-- Profile / Follow / Tier Firebase. Server Chat remains on its existing database
+-- so the new profile system cannot disrupt existing chat history.
+local PROFILE_FIREBASE_DB = "https://sxikiflowsys-default-rtdb.asia-southeast1.firebasedatabase.app"
+local PROFILE_FIREBASE_API_KEY = "AIzaSyCtdBWbOKA2dsjvhuPG-OoyjEiP6QTbsUM"
 local DM_FIREBASE_DB = "https://sxkidirect-default-rtdb.asia-southeast1.firebasedatabase.app"
 local DM_FIREBASE_API_KEY = "AIzaSyALza0_s-MNzaYMrH15WJGAZMJ_RYW4"
 
@@ -240,18 +246,110 @@ end
 
 firebaseSignIn()
 
+local ProfileAuth = {
+    uid = nil,
+    idToken = nil,
+    refreshToken = nil,
+}
+local PROFILE_AUTH_PATH = CACHE_FOLDER .. "/profile_auth.json"
+
+local function profileAuthURL(path, token, extra)
+    local url = PROFILE_FIREBASE_DB .. path .. ".json?auth=" .. urlEncode(token or "")
+    if extra and extra ~= "" then url = url .. "&" .. extra end
+    return url
+end
+
+local function saveProfileAuth()
+    if not (writefile and makefolder) then return end
+    pcall(makefolder, CACHE_FOLDER)
+    pcall(writefile, PROFILE_AUTH_PATH, HttpService:JSONEncode({
+        uid = ProfileAuth.uid,
+        refreshToken = ProfileAuth.refreshToken,
+    }))
+end
+
+local function loadProfileAuth()
+    if not (readfile and isfile) or not isfile(PROFILE_AUTH_PATH) then return end
+    pcall(function()
+        local data = HttpService:JSONDecode(readfile(PROFILE_AUTH_PATH))
+        if type(data) == "table" then
+            ProfileAuth.uid = tostring(data.uid or "")
+            ProfileAuth.refreshToken = tostring(data.refreshToken or "")
+            if ProfileAuth.uid == "" then ProfileAuth.uid = nil end
+            if ProfileAuth.refreshToken == "" then ProfileAuth.refreshToken = nil end
+        end
+    end)
+end
+
+local function refreshProfileAuthToken()
+    if not ProfileAuth.refreshToken then return false end
+    local body = "grant_type=refresh_token&refresh_token=" .. urlEncode(ProfileAuth.refreshToken)
+    local ok, data = requestJSON(
+        "POST",
+        "https://securetoken.googleapis.com/v1/token?key=" .. urlEncode(PROFILE_FIREBASE_API_KEY),
+        body,
+        "application/x-www-form-urlencoded"
+    )
+    if ok and type(data) == "table" and data.id_token then
+        ProfileAuth.idToken = data.id_token
+        ProfileAuth.uid = tostring(data.user_id or ProfileAuth.uid or "")
+        ProfileAuth.refreshToken = data.refresh_token or ProfileAuth.refreshToken
+        saveProfileAuth()
+        return true
+    end
+    return false
+end
+
+local function profileFirebaseSignIn()
+    loadProfileAuth()
+    if refreshProfileAuthToken() then return true end
+
+    local ok, data = requestJSON(
+        "POST",
+        "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. urlEncode(PROFILE_FIREBASE_API_KEY),
+        {returnSecureToken = true}
+    )
+    if not ok or type(data) ~= "table" or not data.localId or not data.idToken then
+        return false
+    end
+
+    ProfileAuth.uid = tostring(data.localId)
+    ProfileAuth.idToken = data.idToken
+    ProfileAuth.refreshToken = data.refreshToken
+    saveProfileAuth()
+    return true
+end
+
 local profile = {
     robloxUserId = LocalPlayer.UserId,
     username = LocalPlayer.Name,
     displayName = LocalPlayer.DisplayName,
 }
 
+profileFirebaseSignIn()
+
 local function saveProfile()
-    requestJSON(
-        "PUT",
-        authURL("/profiles/" .. urlEncode(Auth.uid), Auth.idToken),
-        profile
+    if not ProfileAuth.idToken or not ProfileAuth.uid then return false end
+    local payload = {
+        robloxUserId = LocalPlayer.UserId,
+        username = LocalPlayer.Name,
+        displayName = LocalPlayer.DisplayName,
+        firebaseUid = ProfileAuth.uid,
+        updatedAt = DateTime.now().UnixTimestampMillis,
+    }
+    local ok = requestJSON(
+        "PATCH",
+        profileAuthURL("/profiles/" .. urlEncode(LocalPlayer.UserId), ProfileAuth.idToken),
+        payload
     )
+    if not ok and refreshProfileAuthToken() then
+        ok = requestJSON(
+            "PATCH",
+            profileAuthURL("/profiles/" .. urlEncode(LocalPlayer.UserId), ProfileAuth.idToken),
+            payload
+        )
+    end
+    return ok
 end
 saveProfile()
 
@@ -641,14 +739,26 @@ local DMBack = new("TextButton", {
     Font = Enum.Font.GothamBold, Text = "<", TextColor3 = Color3.fromRGB(170, 170, 175), TextSize = 14, AutoButtonColor = false,
 }, DMHeader)
 
+local DMTargetAvatar = new("ImageButton", {
+    Name = "TargetAvatar",
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(36, 5),
+    Size = UDim2.fromOffset(24, 24),
+    Image = "",
+    ScaleType = Enum.ScaleType.Crop,
+    AutoButtonColor = false,
+    ZIndex = 6,
+}, DMHeader)
+addCorner(DMTargetAvatar, 999)
+
 local DMTarget = new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 4), Size = UDim2.new(1, -46, 0, 13),
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(66, 4), Size = UDim2.new(1, -140, 0, 13),
     Font = Enum.Font.GothamBold, Text = "Direct Message", TextColor3 = Color3.fromRGB(230, 230, 235), TextSize = 10,
     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 }, DMHeader)
 
 local DMTargetUser = new("TextLabel", {
-    BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 17), Size = UDim2.new(1, -122, 0, 10),
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(66, 17), Size = UDim2.new(1, -140, 0, 10),
     Font = Enum.Font.Gotham, Text = "", TextColor3 = Color3.fromRGB(95, 95, 100), TextSize = 7,
     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 }, DMHeader)
@@ -1374,6 +1484,127 @@ addCorner(Toggle, 15)
 addStroke(Toggle, Color3.fromRGB(30, 30, 33), 0.05, 1)
 
 -- -----------------------------------------------------------------------------
+-- Profile / Tier overlay UI
+-- -----------------------------------------------------------------------------
+local ProfileOverlay = new("Frame", {
+    Name = "ProfileOverlay",
+    Size = UDim2.fromScale(1, 1),
+    BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+    BackgroundTransparency = 0.42,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 100,
+}, Main)
+
+local ProfileCard = new("Frame", {
+    Name = "ProfileCard",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(318, 286),
+    BackgroundColor3 = Color3.fromRGB(13, 13, 15),
+    BorderSizePixel = 0,
+    ZIndex = 101,
+}, ProfileOverlay)
+addCorner(ProfileCard, 15)
+addStroke(ProfileCard, Color3.fromRGB(48, 48, 53), 0.08, 1)
+
+local ProfileClose = new("TextButton", {
+    BackgroundTransparency = 1, Position = UDim2.new(1, -34, 0, 6), Size = UDim2.fromOffset(28, 28),
+    Font = Enum.Font.GothamBold, Text = "×", TextColor3 = Color3.fromRGB(155,155,162), TextSize = 17,
+    AutoButtonColor = false, ZIndex = 104,
+}, ProfileCard)
+
+local ProfileAvatar = new("ImageLabel", {
+    BackgroundColor3 = Color3.fromRGB(25,25,28), Position = UDim2.fromOffset(18, 18), Size = UDim2.fromOffset(62,62),
+    Image = "", ScaleType = Enum.ScaleType.Crop, ZIndex = 102,
+}, ProfileCard)
+addCorner(ProfileAvatar, 31)
+
+local ProfileName = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(92,18), Size=UDim2.new(1,-130,0,22),
+    Font=Enum.Font.GothamBold, Text="Profile", TextColor3=Color3.fromRGB(235,235,240), TextSize=13,
+    TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=102,
+}, ProfileCard)
+local ProfileUsername = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(92,40), Size=UDim2.new(1,-130,0,15),
+    Font=Enum.Font.Gotham, Text="@user", TextColor3=Color3.fromRGB(105,105,112), TextSize=8,
+    TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=102,
+}, ProfileCard)
+local ProfileTier = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(92,57), Size=UDim2.new(1,-130,0,16),
+    Font=Enum.Font.GothamBold, Text="TIER 0", TextColor3=Color3.fromRGB(220,75,95), TextSize=8,
+    TextXAlignment=Enum.TextXAlignment.Left, ZIndex=102,
+}, ProfileCard)
+
+local ProfileAbout = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(18,88), Size=UDim2.new(1,-36,0,26),
+    Font=Enum.Font.Gotham, Text="", TextColor3=Color3.fromRGB(165,165,172), TextSize=8,
+    TextWrapped=true, TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top, ZIndex=102,
+}, ProfileCard)
+
+local ProfileProgressBack = new("Frame", {
+    BackgroundColor3=Color3.fromRGB(29,29,33), Position=UDim2.fromOffset(18,120), Size=UDim2.new(1,-36,0,6), BorderSizePixel=0, ZIndex=102,
+}, ProfileCard)
+addCorner(ProfileProgressBack,999)
+local ProfileProgress = new("Frame", {
+    BackgroundColor3=Color3.fromRGB(220,60,80), Size=UDim2.fromScale(0,1), BorderSizePixel=0, ZIndex=103,
+}, ProfileProgressBack)
+addCorner(ProfileProgress,999)
+local ProfileProgressText = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(18,130), Size=UDim2.new(1,-36,0,13),
+    Font=Enum.Font.Gotham, Text="0 followers", TextColor3=Color3.fromRGB(105,105,112), TextSize=7,
+    TextXAlignment=Enum.TextXAlignment.Left, ZIndex=102,
+}, ProfileCard)
+
+local ProfileFollowersButton = new("TextButton", {
+    BackgroundColor3=Color3.fromRGB(20,20,23), Position=UDim2.fromOffset(18,151), Size=UDim2.fromOffset(134,38),
+    BorderSizePixel=0, Font=Enum.Font.GothamBold, Text="0\nFOLLOWERS", TextColor3=Color3.fromRGB(220,220,225), TextSize=8,
+    AutoButtonColor=false, ZIndex=102,
+}, ProfileCard)
+addCorner(ProfileFollowersButton,9)
+local ProfileFollowingButton = new("TextButton", {
+    BackgroundColor3=Color3.fromRGB(20,20,23), Position=UDim2.fromOffset(166,151), Size=UDim2.fromOffset(134,38),
+    BorderSizePixel=0, Font=Enum.Font.GothamBold, Text="0\nFOLLOWING", TextColor3=Color3.fromRGB(220,220,225), TextSize=8,
+    AutoButtonColor=false, ZIndex=102,
+}, ProfileCard)
+addCorner(ProfileFollowingButton,9)
+
+local ProfileFollow = new("TextButton", {
+    BackgroundColor3=Color3.fromRGB(220,60,80), Position=UDim2.fromOffset(18,200), Size=UDim2.fromOffset(134,35),
+    BorderSizePixel=0, Font=Enum.Font.GothamBold, Text="FOLLOW", TextColor3=Color3.fromRGB(255,255,255), TextSize=8,
+    AutoButtonColor=false, ZIndex=102,
+}, ProfileCard)
+addCorner(ProfileFollow,9)
+local ProfileDM = new("TextButton", {
+    BackgroundColor3=Color3.fromRGB(28,28,32), Position=UDim2.fromOffset(166,200), Size=UDim2.fromOffset(134,35),
+    BorderSizePixel=0, Font=Enum.Font.GothamBold, Text="DM", TextColor3=Color3.fromRGB(225,225,230), TextSize=8,
+    AutoButtonColor=false, ZIndex=102,
+}, ProfileCard)
+addCorner(ProfileDM,9)
+
+local ProfileStatus = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(18,243), Size=UDim2.new(1,-36,0,25),
+    Font=Enum.Font.Gotham, Text="", TextColor3=Color3.fromRGB(92,92,98), TextSize=7,
+    TextXAlignment=Enum.TextXAlignment.Center, TextYAlignment=Enum.TextYAlignment.Center, ZIndex=102,
+}, ProfileCard)
+
+local ProfileList = new("ScrollingFrame", {
+    Name="ProfileList", Position=UDim2.fromOffset(10,44), Size=UDim2.new(1,-20,1,-54),
+    BackgroundTransparency=1, BorderSizePixel=0, ScrollBarThickness=2, ScrollBarImageColor3=Color3.fromRGB(55,55,60),
+    CanvasSize=UDim2.fromOffset(0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y, Visible=false, ZIndex=103,
+}, ProfileCard)
+new("UIListLayout", {Padding=UDim.new(0,4), SortOrder=Enum.SortOrder.LayoutOrder}, ProfileList)
+local ProfileListTitle = new("TextLabel", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(18,15), Size=UDim2.new(1,-70,0,20),
+    Font=Enum.Font.GothamBold, Text="Followers", TextColor3=Color3.fromRGB(235,235,240), TextSize=10,
+    TextXAlignment=Enum.TextXAlignment.Left, Visible=false, ZIndex=104,
+}, ProfileCard)
+local ProfileListBack = new("TextButton", {
+    BackgroundTransparency=1, Position=UDim2.fromOffset(8,8), Size=UDim2.fromOffset(28,28), Font=Enum.Font.GothamBold,
+    Text="<", TextColor3=Color3.fromRGB(165,165,172), TextSize=13, AutoButtonColor=false, Visible=false, ZIndex=104,
+}, ProfileCard)
+
+-- -----------------------------------------------------------------------------
 -- Dragging
 -- -----------------------------------------------------------------------------
 local function makeDraggable(handle, target)
@@ -1597,6 +1828,14 @@ local function makeDMRow(parent, candidate, compact)
         Size = UDim2.fromOffset(avatarSize, avatarSize), Image=getAvatar(candidate.Id), ScaleType=Enum.ScaleType.Crop,
     }, row)
     addCorner(avatar, avatarSize/2)
+    local profileHit = new("TextButton", {
+        BackgroundTransparency = 1, Position = avatar.Position, Size = avatar.Size,
+        Text = "", AutoButtonColor = false, ZIndex = 4,
+    }, row)
+    addCorner(profileHit, avatarSize/2)
+    profileHit.Activated:Connect(function()
+        openProfile(candidate.Id, candidate.Username, candidate.DisplayName)
+    end)
     new("TextLabel", {
         BackgroundTransparency = 1, Position = UDim2.fromOffset(41, compact and 5 or 6), Size = UDim2.new(1,-46,0,13),
         Font = Enum.Font.GothamBold, Text = candidate.DisplayName, TextColor3 = Color3.fromRGB(225,225,230), TextSize = compact and 8 or 9,
@@ -1624,6 +1863,8 @@ local function makeDMRow(parent, candidate, compact)
         activeDMUser = candidate
         DMSearch.Visible=false; DMHome.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
         DMTarget.Text=candidate.DisplayName; DMTargetUser.Text="@"..candidate.Username
+        DMTargetAvatar.Image=getAvatar(candidate.Id)
+        DMTargetAvatar:SetAttribute("ProfileUserId", candidate.Id)
         Composer.Visible=true
         StickerOpen.Visible=true
         dmSeen={}
@@ -2173,7 +2414,7 @@ local function closeDMConversation()
     renderDMResults()
 end
 
-local function switchTab(tab)
+switchTab = function(tab)
     activeTab=tab
     local dm=tab=="dm"
     Scroll.Visible=not dm
@@ -2190,6 +2431,11 @@ local function switchTab(tab)
     end
 end
 DMBack.MouseButton1Click:Connect(closeDMConversation)
+DMTargetAvatar.Activated:Connect(function()
+    if activeDMUser then
+        openProfile(activeDMUser.Id, activeDMUser.Username, activeDMUser.DisplayName)
+    end
+end)
 
 LoadChatButton.MouseButton1Click:Connect(function()
     if not activeDMUser then return end
@@ -2255,6 +2501,288 @@ local sendMessage
 getAvatar = function(userId)
     return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(userId) .. "&width=48&height=48&format=png"
 end
+
+local ProfileCache = {}
+local PROFILE_CACHE_TTL = 60
+local activeProfile = nil
+local profileListMode = nil
+
+local function tierForFollowers(count)
+    count = math.max(0, tonumber(count) or 0)
+    if count >= 125 then return 5 end
+    if count >= 100 then return 4 end
+    if count >= 75 then return 3 end
+    if count >= 50 then return 2 end
+    if count >= 25 then return 1 end
+    return 0
+end
+
+local function tierProgressForFollowers(count)
+    count = math.max(0, tonumber(count) or 0)
+    local tier = tierForFollowers(count)
+    if tier >= 5 then return 1, "MAX TIER" end
+    local base = tier * 25
+    local nextAt = (tier + 1) * 25
+    local progress = math.clamp((count - base) / 25, 0, 1)
+    return progress, tostring(nextAt - count) .. " more to Tier " .. tostring(tier + 1)
+end
+
+local function profileCount(data)
+    if type(data) ~= "table" then return 0 end
+    local n = 0
+    for _ in pairs(data) do n += 1 end
+    return n
+end
+
+local function fetchProfileData(userId, username, displayName, force)
+    userId = tonumber(userId)
+    if not userId then return nil end
+    local cached = ProfileCache[userId]
+    if cached and not force and DateTime.now().UnixTimestampMillis - (cached.refreshedAt or 0) < PROFILE_CACHE_TTL * 1000 then
+        return cached
+    end
+    if not ProfileAuth.idToken and not profileFirebaseSignIn() then return cached end
+
+    local ok, data = requestJSON("GET", profileAuthURL("/profiles/" .. urlEncode(userId), ProfileAuth.idToken))
+    if not ok and refreshProfileAuthToken() then
+        ok, data = requestJSON("GET", profileAuthURL("/profiles/" .. urlEncode(userId), ProfileAuth.idToken))
+    end
+    if not ok or type(data) ~= "table" then
+        data = cached or {}
+    end
+
+    local followersOK, followersData = requestJSON("GET", profileAuthURL("/followers/" .. urlEncode(userId), ProfileAuth.idToken))
+    local followers = followersOK and profileCount(followersData) or tonumber(data.followers) or (cached and cached.followers) or 0
+
+    local following = tonumber(data.following) or (cached and cached.following) or 0
+    local firebaseUid = tostring(data.firebaseUid or (cached and cached.firebaseUid) or "")
+    if firebaseUid ~= "" then
+        local followingOK, followingData = requestJSON("GET", profileAuthURL("/following/" .. urlEncode(firebaseUid), ProfileAuth.idToken))
+        if followingOK then following = profileCount(followingData) end
+    end
+
+    local result = {
+        userId = userId,
+        username = tostring(data.username or username or (cached and cached.username) or ""),
+        displayName = tostring(data.displayName or displayName or (cached and cached.displayName) or "Unknown"),
+        avatar = getAvatar(userId),
+        followers = followers,
+        following = following,
+        tier = tierForFollowers(followers),
+        firebaseUid = firebaseUid,
+        about = tostring(data.about or (cached and cached.about) or ""),
+        relationship = cached and cached.relationship or "none",
+        refreshedAt = DateTime.now().UnixTimestampMillis,
+    }
+
+    if ProfileAuth.uid and firebaseUid ~= "" and firebaseUid == ProfileAuth.uid then
+        result.relationship = "self"
+    elseif ProfileAuth.uid then
+        local relationshipOK, relationshipData = requestJSON(
+            "GET",
+            profileAuthURL("/followers/" .. urlEncode(userId) .. "/" .. urlEncode(ProfileAuth.uid), ProfileAuth.idToken)
+        )
+        if relationshipOK and type(relationshipData) == "table" then
+            result.relationship = "following"
+        else
+            result.relationship = "none"
+        end
+    end
+
+    ProfileCache[userId] = result
+    return result
+end
+
+local function setProfileStatus(textValue)
+    ProfileStatus.Text = tostring(textValue or "")
+end
+
+local function renderProfile(data)
+    if not data then return end
+    activeProfile = data
+    ProfileAvatar.Image = data.avatar or getAvatar(data.userId)
+    ProfileName.Text = data.displayName or "Unknown"
+    ProfileUsername.Text = "@" .. tostring(data.username or "")
+    ProfileTier.Text = "TIER " .. tostring(data.tier or 0)
+    ProfileAbout.Text = data.about ~= "" and data.about or "No status set."
+    ProfileFollowersButton.Text = tostring(data.followers or 0) .. "\nFOLLOWERS"
+    ProfileFollowingButton.Text = tostring(data.following or 0) .. "\nFOLLOWING"
+    local progress, progressText = tierProgressForFollowers(data.followers or 0)
+    ProfileProgress.Size = UDim2.new(progress, 0, 1, 0)
+    ProfileProgressText.Text = tostring(data.followers or 0) .. " followers  •  " .. progressText
+    ProfileFollow.Visible = data.relationship ~= "self"
+    ProfileDM.Visible = data.relationship ~= "self"
+    ProfileFollow.Text = data.relationship == "following" and "FOLLOWING" or "FOLLOW"
+    ProfileFollow.BackgroundColor3 = data.relationship == "following" and Color3.fromRGB(31,31,35) or Color3.fromRGB(220,60,80)
+    ProfileStatus.Text = ""
+end
+
+local function clearProfileList()
+    for _, child in ipairs(ProfileList:GetChildren()) do
+        if child:IsA("GuiObject") and not child:IsA("UIListLayout") then child:Destroy() end
+    end
+end
+
+local function showProfileList(mode)
+    if not activeProfile or not ProfileAuth.idToken then return end
+    profileListMode = mode
+    ProfileAvatar.Visible=false; ProfileName.Visible=false; ProfileUsername.Visible=false; ProfileTier.Visible=false
+    ProfileAbout.Visible=false; ProfileProgressBack.Visible=false; ProfileProgressText.Visible=false
+    ProfileFollowersButton.Visible=false; ProfileFollowingButton.Visible=false; ProfileFollow.Visible=false; ProfileDM.Visible=false; ProfileStatus.Visible=false
+    ProfileList.Visible=true; ProfileListTitle.Visible=true; ProfileListBack.Visible=true
+    ProfileListTitle.Text = mode == "followers" and "Followers" or "Following"
+    clearProfileList()
+    local path
+    if mode == "followers" then
+        path = "/followers/" .. urlEncode(activeProfile.userId)
+    else
+        local uid = tostring(activeProfile.firebaseUid or "")
+        if uid == "" then
+            setProfileStatus("Following data unavailable")
+            return
+        end
+        path = "/following/" .. urlEncode(uid)
+    end
+    local ok, data = requestJSON("GET", profileAuthURL(path, ProfileAuth.idToken))
+    if not ok or type(data) ~= "table" or next(data) == nil then
+        new("TextLabel", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,40), Font=Enum.Font.Gotham, Text="No users yet", TextColor3=Color3.fromRGB(100,100,106), TextSize=8, TextXAlignment=Enum.TextXAlignment.Center, TextYAlignment=Enum.TextYAlignment.Center, ZIndex=104}, ProfileList)
+        return
+    end
+    for _, entry in pairs(data) do
+        if type(entry) == "table" then
+            local uid = tonumber(entry.robloxUserId)
+            if uid then
+                local row = new("TextButton", {BackgroundColor3=Color3.fromRGB(20,20,23), Size=UDim2.new(1,0,0,42), BorderSizePixel=0, Text="", AutoButtonColor=false, ZIndex=104}, ProfileList)
+                addCorner(row,9)
+                local avatar = new("ImageLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(6,5), Size=UDim2.fromOffset(32,32), Image=getAvatar(uid), ScaleType=Enum.ScaleType.Crop, ZIndex=105}, row)
+                addCorner(avatar,16)
+                new("TextLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(47,5), Size=UDim2.new(1,-55,0,14), Font=Enum.Font.GothamBold, Text=tostring(entry.displayName or entry.username or "Unknown"), TextColor3=Color3.fromRGB(225,225,230), TextSize=8, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=105}, row)
+                new("TextLabel", {BackgroundTransparency=1, Position=UDim2.fromOffset(47,20), Size=UDim2.new(1,-55,0,11), Font=Enum.Font.Gotham, Text="@"..tostring(entry.username or ""), TextColor3=Color3.fromRGB(100,100,106), TextSize=7, TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=105}, row)
+                row.Activated:Connect(function()
+                    openProfile(uid, entry.username, entry.displayName)
+                end)
+            end
+        end
+    end
+end
+
+local function hideProfileList()
+    profileListMode=nil
+    ProfileList.Visible=false; ProfileListTitle.Visible=false; ProfileListBack.Visible=false
+    ProfileAvatar.Visible=true; ProfileName.Visible=true; ProfileUsername.Visible=true; ProfileTier.Visible=true
+    ProfileAbout.Visible=true; ProfileProgressBack.Visible=true; ProfileProgressText.Visible=true
+    ProfileFollowersButton.Visible=true; ProfileFollowingButton.Visible=true; ProfileStatus.Visible=true
+    if activeProfile then renderProfile(activeProfile) end
+end
+
+openProfile = function(userId, username, displayName)
+    local cached = ProfileCache[tonumber(userId)]
+    ProfileOverlay.Visible=true
+    ProfileCard.Size=UDim2.fromOffset(306,276)
+    tween(ProfileCard, {Size=UDim2.fromOffset(318,286)}, 0.16)
+    hideProfileList()
+    if cached then renderProfile(cached) else
+        renderProfile({userId=tonumber(userId), username=tostring(username or ""), displayName=tostring(displayName or username or "Unknown"), avatar=getAvatar(userId), followers=0, following=0, tier=0, relationship="none", about="", firebaseUid=""})
+        setProfileStatus("Loading profile...")
+    end
+    task.spawn(function()
+        local data = fetchProfileData(userId, username, displayName, false)
+        if data and ProfileOverlay.Visible and activeProfile and tonumber(activeProfile.userId)==tonumber(userId) then
+            renderProfile(data)
+        end
+    end)
+end
+
+local function closeProfile()
+    ProfileOverlay.Visible=false
+    activeProfile=nil
+    profileListMode=nil
+end
+
+local function toggleFollowProfile()
+    local target = activeProfile
+    if not target or target.relationship == "self" or not ProfileAuth.idToken then return end
+    local targetProfile = fetchProfileData(target.userId, target.username, target.displayName, false) or target
+    local targetUid = tostring(targetProfile.firebaseUid or "")
+    if targetUid == "" then
+        setProfileStatus("User profile is not ready yet")
+        return
+    end
+    local following = target.relationship == "following"
+    local base = DateTime.now().UnixTimestampMillis
+    local record = {
+        robloxUserId = LocalPlayer.UserId,
+        firebaseUid = ProfileAuth.uid,
+        username = LocalPlayer.Name,
+        displayName = LocalPlayer.DisplayName,
+        createdAt = base,
+    }
+    local updates = {}
+    if following then
+        updates["/followers/" .. tostring(target.userId) .. "/" .. tostring(ProfileAuth.uid)] = nil
+        updates["/following/" .. tostring(ProfileAuth.uid) .. "/" .. tostring(target.userId)] = nil
+    else
+        updates["/followers/" .. tostring(target.userId) .. "/" .. tostring(ProfileAuth.uid)] = record
+        updates["/following/" .. tostring(ProfileAuth.uid) .. "/" .. tostring(target.userId)] = {
+            robloxUserId = target.userId, firebaseUid = targetUid, username = target.username, displayName = target.displayName, createdAt = base,
+        }
+    end
+    setProfileStatus(following and "Updating..." or "Following...")
+    local ok = requestJSON("PATCH", PROFILE_FIREBASE_DB .. ".json?auth=" .. urlEncode(ProfileAuth.idToken), updates)
+    if not ok and refreshProfileAuthToken() then
+        ok = requestJSON("PATCH", PROFILE_FIREBASE_DB .. ".json?auth=" .. urlEncode(ProfileAuth.idToken), updates)
+    end
+    if not ok then
+        setProfileStatus("Could not update follow state")
+        return
+    end
+    local verifyPath = "/followers/" .. tostring(target.userId) .. "/" .. tostring(ProfileAuth.uid)
+    local verifyOK, verifyData = requestJSON("GET", profileAuthURL(verifyPath, ProfileAuth.idToken))
+    if not verifyOK then
+        setProfileStatus("Follow state could not be confirmed")
+        return
+    end
+    local exists = type(verifyData) == "table" and next(verifyData) ~= nil
+    local confirmed = following and not exists or (not following and exists)
+    if confirmed then
+        target.relationship = following and "none" or "following"
+        target.followers = math.max(0, (tonumber(target.followers) or 0) + (following and -1 or 1))
+        target.tier = tierForFollowers(target.followers)
+        target.refreshedAt = DateTime.now().UnixTimestampMillis
+        ProfileCache[target.userId] = target
+        renderProfile(target)
+    else
+        setProfileStatus("Follow state could not be confirmed")
+    end
+end
+
+ProfileClose.Activated:Connect(closeProfile)
+ProfileOverlay.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        local p=input.Position; local q=ProfileCard.AbsolutePosition; local z=ProfileCard.AbsoluteSize
+        if not (p.X>=q.X and p.X<=q.X+z.X and p.Y>=q.Y and p.Y<=q.Y+z.Y) then closeProfile() end
+    end
+end)
+ProfileFollow.Activated:Connect(toggleFollowProfile)
+ProfileDM.Activated:Connect(function()
+    local target=activeProfile
+    if not target or target.relationship=="self" then return end
+    closeProfile()
+    activeTab="dm"
+    switchTab("dm")
+    task.defer(function()
+        local candidate={Id=target.userId,Username=target.username,DisplayName=target.displayName,Source="Profile"}
+        activeDMUser=candidate
+        DMSearch.Visible=false; DMHome.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
+        DMTarget.Text=candidate.DisplayName; DMTargetUser.Text="@"..candidate.Username; DMTargetAvatar.Image=getAvatar(candidate.Id)
+        Composer.Visible=true; StickerOpen.Visible=true; dmSeen={}
+        DMLoading.Text="Loading chat..."; DMLoading.Visible=true
+        ensureDMThread(); loadDMMessages()
+    end)
+end)
+ProfileFollowersButton.Activated:Connect(function() showProfileList("followers") end)
+ProfileFollowingButton.Activated:Connect(function() showProfileList("following") end)
+ProfileListBack.Activated:Connect(hideProfileList)
 
 clearReply = function()
     replyKey = nil
@@ -3122,6 +3650,15 @@ renderMessage = function(message)
         ClipsDescendants = true,
     }, holder)
     addCorner(avatar, math.floor(avatarSize / 2))
+    if not mine and not isUltron and tonumber(message.robloxUserId) then
+        local avatarHit = new("TextButton", {
+            BackgroundTransparency=1, Size=avatar.Size, Position=avatar.Position, Text="", AutoButtonColor=false, ZIndex=6,
+        }, holder)
+        addCorner(avatarHit, math.floor(avatarSize / 2))
+        avatarHit.Activated:Connect(function()
+            openProfile(message.robloxUserId, message.username, message.displayName)
+        end)
+    end
 
     -- Ultron join messages use the exact same incoming-message bubble
     -- geometry and color as every other message received from another user.
@@ -3343,6 +3880,20 @@ sendMessage = function()
 
     local textValue = tostring(Input.Text or "")
     if textValue:gsub("%s+", "") == "" then return end
+
+    if string.lower(textValue):gsub("%s+", "") == "/tier" then
+        local own = fetchProfileData(LocalPlayer.UserId, LocalPlayer.Name, LocalPlayer.DisplayName, false)
+        if own then
+            renderMessage({
+                key = "local_tier_" .. tostring(DateTime.now().UnixTimestampMillis) .. "_" .. tostring(math.random(100000,999999)),
+                robloxUserId = 0, username = "Saiki Rechat", displayName = "Saiki Rechat",
+                type = "text", message = "You are TIER " .. tostring(own.tier) .. " • " .. tostring(own.followers) .. " followers",
+                timestamp = DateTime.now().UnixTimestampMillis, _system = true,
+            })
+        end
+        Input.Text = ""
+        return
+    end
 
     local elapsed = os.clock() - lastSentAt
     if elapsed < SLOW_MODE then
@@ -3649,4 +4200,4 @@ applyCleanTheme = function(name,animate)
     if THEMES[name] then currentThemeName=name end
 end
 
-print("[Saiki Rechat v22] Loaded | Server: " .. tostring(game.JobId))
+print("[Saiki Rechat v28] Loaded | Server: " .. tostring(game.JobId))
