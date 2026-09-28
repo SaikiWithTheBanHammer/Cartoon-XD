@@ -326,7 +326,9 @@ local profile = {
     displayName = LocalPlayer.DisplayName,
 }
 
-profileFirebaseSignIn()
+-- Profile Firebase is intentionally initialized in the background after the
+-- main GUI has started. A slow/unavailable profile database must NEVER prevent
+-- Saiki Rechat itself from loading.
 
 local function saveProfile()
     if not ProfileAuth.idToken or not ProfileAuth.uid then return false end
@@ -351,7 +353,13 @@ local function saveProfile()
     end
     return ok
 end
-saveProfile()
+
+-- Do not block GUI startup on Profile/Tier Firebase.
+task.spawn(function()
+    if profileFirebaseSignIn() then
+        pcall(saveProfile)
+    end
+end)
 
 -- Separate Firebase project/authentication for Direct Messages. Server Chat
 -- continues using the original Saiki Rechat Firebase project unchanged.
