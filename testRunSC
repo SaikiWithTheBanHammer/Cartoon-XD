@@ -136,7 +136,7 @@ local function requestJSON(method, url, body, contentType)
     if raw ~= "" then
         pcall(function() decoded = HttpService:JSONDecode(raw) end)
     end
-    return status >= 200 and status < 300, decoded, raw
+    return status >= 200 and status < 300, decoded, raw, status
 end
 
 local function urlEncode(value)
@@ -690,16 +690,28 @@ ProfileFollow.Activated:Connect(function()
     else
         local stamp = os.time()
         local followerRecord = {firebaseUid=me,robloxUserId=LocalPlayer.UserId,username=LocalPlayer.Name,displayName=LocalPlayer.DisplayName,createdAt=stamp}
-        local followingRecord = {firebaseUid=tostring(data.firebaseUid or ""),robloxUserId=tonumber(target),username=data.username,displayName=data.displayName,createdAt=stamp}
-        if followingRecord.firebaseUid == "" then
-            ok = false
-        else
-            ok = requestJSON("PUT", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me)), followerRecord) and ok
-            ok = requestJSON("PUT", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target)), followingRecord) and ok
+        local followingRecord = {robloxUserId=tonumber(target),username=data.username,displayName=data.displayName,createdAt=stamp}
+        local okFollower, _, followerRaw, followerStatus = requestJSON("PUT", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me)), followerRecord)
+        local okFollowing, _, followingRaw, followingStatus = requestJSON("PUT", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target)), followingRecord)
+        ok = okFollower and okFollowing
+        if not ok then
+            -- Roll back a partial follower write so the relationship cannot become half-saved.
+            if okFollower and not okFollowing then
+                requestJSON("DELETE", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me)))
+            elseif okFollowing and not okFollower then
+                requestJSON("DELETE", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target)))
+            end
+            local detail = (not okFollower and tostring(followerRaw or "")) or (not okFollowing and tostring(followingRaw or "")) or ""
+            local status = (not okFollower and followerStatus) or (not okFollowing and followingStatus) or 0
+            local reason = detail
+            local decodedReason = detail:match('"error"%s*:%s*"([^"]+)"')
+            if decodedReason then reason = decodedReason end
+            if reason == "" then reason = "HTTP " .. tostring(status) end
+            ProfileStatus.Text = "Follow failed: " .. reason
         end
         if ok then data.followingMe=true; data.followers += 1 end
     end
-    if ok then refreshProfileUI(data) else ProfileStatus.Text = "Could not update follow" end
+    if ok then refreshProfileUI(data) end
     profileBusy = false
 end)
 
