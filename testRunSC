@@ -41,11 +41,18 @@ local dmSeen = {}
 local getAvatar
 local openProfile
 local switchTab
+local loadDMMessages
+local ensureDMThread
+local TabPopover, TabSwitch, Scroll
+local DMRoot, DMSearch, DMHome, DMResults, DMHeader, DMConversation, DMLoading
+local Composer, Input, StickerOpen
 
 local FIREBASE_DB = "https://sxkicxat-default-rtdb.asia-southeast1.firebasedatabase.app"
 local FIREBASE_API_KEY = "AIzaSyCgvkvar8qhD3zqYC83BW6GHxGQVYoDhrM"
 local DM_FIREBASE_DB = "https://sxkidirect-default-rtdb.asia-southeast1.firebasedatabase.app"
 local DM_FIREBASE_API_KEY = "AIzaSyALza0_s-MNzaYMrH15WJGAZMJ_RYW4"
+local PROFILE_FIREBASE_DB = "https://sxikiflowsys-default-rtdb.asia-southeast1.firebasedatabase.app"
+local PROFILE_FIREBASE_API_KEY = "AIzaSyCtdBWbOKA2dsjvhuPG-OoyjEiP6QTbsUM"
 
 local HIDE_BUTTON_URL = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/SchatButton.jpg"
 local SEND_ICON_URL = "https://github.com/SaikiWithTheBanHammer/ScriptBlox/blob/main/SendIcon.jpg"
@@ -242,6 +249,46 @@ end
 
 firebaseSignIn()
 
+-- Profile/follow Firebase is authenticated lazily. It must never block the
+-- main chat GUI from loading.
+local ProfileAuth = {uid=nil, idToken=nil, refreshToken=nil}
+local function profileAuthURL(path, token, extra)
+    local url = PROFILE_FIREBASE_DB .. path .. ".json?auth=" .. urlEncode(token or "")
+    if extra and extra ~= "" then url = url .. "&" .. extra end
+    return url
+end
+local function profileFirebaseSignIn()
+    if ProfileAuth.idToken then return true end
+    local ok, data = requestJSON(
+        "POST",
+        "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. urlEncode(PROFILE_FIREBASE_API_KEY),
+        {returnSecureToken=true}
+    )
+    if ok and type(data)=="table" and data.localId and data.idToken then
+        ProfileAuth.uid=data.localId
+        ProfileAuth.idToken=data.idToken
+        ProfileAuth.refreshToken=data.refreshToken
+        return true
+    end
+    return false
+end
+local function refreshProfileFirebaseToken()
+    if not ProfileAuth.refreshToken then return false end
+    local body="grant_type=refresh_token&refresh_token="..urlEncode(ProfileAuth.refreshToken)
+    local ok,data=requestJSON(
+        "POST",
+        "https://securetoken.googleapis.com/v1/token?key="..urlEncode(PROFILE_FIREBASE_API_KEY),
+        body,
+        "application/x-www-form-urlencoded"
+    )
+    if ok and data and data.id_token then
+        ProfileAuth.idToken=data.id_token
+        ProfileAuth.refreshToken=data.refresh_token or ProfileAuth.refreshToken
+        return true
+    end
+    return false
+end
+
 local profile = {
     robloxUserId = LocalPlayer.UserId,
     username = LocalPlayer.Name,
@@ -249,12 +296,19 @@ local profile = {
 }
 
 local function saveProfile()
-    if not Auth.idToken then return false end
+    if not profileFirebaseSignIn() then return false end
     local ok = requestJSON(
         "PUT",
-        authURL("/profiles/" .. urlEncode(profile.robloxUserId), Auth.idToken),
+        profileAuthURL("/profiles/" .. urlEncode(profile.robloxUserId), ProfileAuth.idToken),
         profile
     )
+    if not ok and refreshProfileFirebaseToken() then
+        ok = requestJSON(
+            "PUT",
+            profileAuthURL("/profiles/" .. urlEncode(profile.robloxUserId), ProfileAuth.idToken),
+            profile
+        )
+    end
     return ok == true
 end
 task.spawn(function()
@@ -515,19 +569,20 @@ local function getTier(followers)
     return TIER_RANGES[1]
 end
 
-local function profileURL(path)
-    if not Auth.idToken then return nil end
-    return authURL(path, Auth.idToken)
+local function profileURL(path, extra)
+    if not ProfileAuth.idToken then return nil end
+    return profileAuthURL(path, ProfileAuth.idToken, extra)
 end
 
 local function fetchProfileData(userId)
     local key = tostring(userId)
     if profileCache[key] then return profileCache[key] end
-    if not Auth.idToken then return nil, "Profile service not ready" end
+    if not profileFirebaseSignIn() then return nil, "Profile service unavailable" end
 
     local okP, p = requestJSON("GET", profileURL("/profiles/" .. urlEncode(key)))
     local okF, f = requestJSON("GET", profileURL("/followers/" .. urlEncode(key)))
-    local okG, g = requestJSON("GET", profileURL("/following/" .. urlEncode(key)))
+    -- Following is stored under the viewer's Firebase profile UID, not Roblox UserId.
+    local okG, g = requestJSON("GET", profileURL("/following/" .. urlEncode(ProfileAuth.uid)))
     local followers = type(f) == "table" and 0 or 0
     local following = type(g) == "table" and 0 or 0
     if type(f) == "table" then for _ in pairs(f) do followers += 1 end end
@@ -541,7 +596,7 @@ local function fetchProfileData(userId)
         displayName = tostring(data.displayName or (player and player.DisplayName) or "Unknown"),
         followers = followers, following = following,
     }
-    local me = tostring(Auth.uid or "")
+    local me = tostring(ProfileAuth.uid or "")
     if me ~= "" and tonumber(userId) ~= LocalPlayer.UserId then
         local okRel, rel = requestJSON("GET", profileURL("/followers/" .. urlEncode(key) .. "/" .. urlEncode(me)))
         result.followingMe = okRel and rel ~= nil
@@ -613,11 +668,15 @@ ProfileShade.InputBegan:Connect(function(input)
 end)
 
 ProfileFollow.Activated:Connect(function()
-    if not profileTarget or profileTarget.Id == LocalPlayer.UserId or not Auth.idToken then return end
+    if not profileTarget or profileTarget.Id == LocalPlayer.UserId then return end
+    if not profileFirebaseSignIn() then
+        ProfileStatus.Text = "Profile service unavailable"
+        return
+    end
     local data = profileCache[tostring(profileTarget.Id)]
     if not data or profileBusy then return end
     profileBusy = true
-    local me = tostring(Auth.uid)
+    local me = tostring(ProfileAuth.uid)
     local target = tostring(profileTarget.Id)
     local following = data.followingMe == true
     local ok = true
@@ -639,9 +698,13 @@ end)
 ProfileDM.Activated:Connect(function()
     if not profileTarget or profileTarget.Id == LocalPlayer.UserId then return end
     local candidate = {Id=profileTarget.Id,Username=profileTarget.Username,DisplayName=profileTarget.DisplayName,Source="Profile"}
-    ProfileShade.Visible = false
-    activeDMUser = candidate
-    switchTab("dm")
+    ProfileShade.Visible=false
+    activeTab="dm"
+    activeDMUser=candidate
+    TabPopover.Visible=false
+    Scroll.Visible=false
+    DMRoot.Visible=true
+    TabSwitch.Text="DM"
     DMSearch.Visible=false
     DMHome.Visible=false
     DMResults.Visible=false
@@ -651,6 +714,7 @@ ProfileDM.Activated:Connect(function()
     DMTargetUser.Text="@"..candidate.Username
     Composer.Visible=true
     StickerOpen.Visible=true
+    Input.PlaceholderText=""
     dmSeen={}
     for _, child in ipairs(DMConversation:GetChildren()) do
         if child:IsA("GuiObject") and child ~= DMLoading and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
@@ -660,6 +724,8 @@ ProfileDM.Activated:Connect(function()
     DMLoading.Text="Loading chat..."
     DMLoading.Visible=true
     task.spawn(function()
+        if not DMAuth.idToken then dmSignIn() end
+        if DMAuth.idToken then ensureDMThread() end
         if loadDMMessages then loadDMMessages() end
     end)
 end)
@@ -674,7 +740,7 @@ local Header = new("Frame", {
 }, Main)
 
 -- Server Chat / DM switch. One tap changes between the two views.
-local TabSwitch = new("TextButton", {
+TabSwitch = new("TextButton", {
     Name = "TabSwitch",
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromOffset(28, 23),
@@ -691,7 +757,7 @@ local TabSwitch = new("TextButton", {
 addCorner(TabSwitch, 999)
 addStroke(TabSwitch, Color3.fromRGB(65, 65, 72), 0.35, 1)
 
-local TabPopover = new("Frame", {
+TabPopover = new("Frame", {
     Name="TabPopover", Position=UDim2.fromOffset(8,43), Size=UDim2.fromOffset(116,82),
     BackgroundColor3=Color3.fromRGB(16,16,19), BorderSizePixel=0, Visible=false, ZIndex=80,
 }, Main)
@@ -749,7 +815,7 @@ AnchorButton.Activated:Connect(function()
 end)
 
 -- Message viewport.
-local Scroll = new("ScrollingFrame", {
+Scroll = new("ScrollingFrame", {
     Name = "Messages",
     Position = UDim2.fromOffset(12, 49),
     Size = UDim2.new(1, -24, 1, -103),
@@ -779,7 +845,7 @@ new("UIPadding", {
 -- -----------------------------------------------------------------------------
 -- Direct Messages UI
 -- -----------------------------------------------------------------------------
-local DMRoot = new("Frame", {
+DMRoot = new("Frame", {
     Name = "DMRoot",
     Position = UDim2.fromOffset(12, 49),
     Size = UDim2.new(1, -24, 1, -103),
@@ -818,7 +884,7 @@ new("Frame", {
     Rotation = 45, BackgroundColor3 = Color3.fromRGB(135, 135, 142), BorderSizePixel = 0,
 }, SearchIcon)
 
-local DMSearch = new("TextBox", {
+DMSearch = new("TextBox", {
     BackgroundTransparency = 1, Position = UDim2.fromOffset(36, 0),
     Size = UDim2.new(1, -72, 1, 0), BorderSizePixel = 0, ClearTextOnFocus = false,
     Font = Enum.Font.Gotham, Text = "", PlaceholderText = "Search people...",
@@ -832,7 +898,7 @@ local DMSearchClear = new("TextButton", {
     TextSize = 15, AutoButtonColor = false, Visible = false,
 }, DMSearchShell)
 
-local DMHome = new("Frame", {
+DMHome = new("Frame", {
     Name = "DMHome",
     Position = UDim2.fromOffset(0, 45),
     Size = UDim2.new(1, 0, 1, -45),
@@ -884,7 +950,7 @@ local DMHistoryList = new("ScrollingFrame", {
 }, DMHistoryPanel)
 new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, DMHistoryList)
 
-local DMResults = new("ScrollingFrame", {
+DMResults = new("ScrollingFrame", {
     Name = "SearchResults", Position = UDim2.fromOffset(0, 45), Size = UDim2.new(1, 0, 1, -45),
     BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
     ScrollBarImageColor3 = Color3.fromRGB(42, 42, 45), CanvasSize = UDim2.fromOffset(0, 0),
@@ -893,7 +959,7 @@ local DMResults = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder}, DMResults)
 new("UIPadding", {PaddingBottom = UDim.new(0, 5)}, DMResults)
 
-local DMHeader = new("Frame", {
+DMHeader = new("Frame", {
     Name = "ConversationHeader",
     Position = UDim2.fromOffset(0, 0),
     Size = UDim2.new(1, 0, 0, 34),
@@ -939,7 +1005,7 @@ local LoadChatButton = new("TextButton", {
 addCorner(LoadChatButton, 7)
 addStroke(LoadChatButton, Color3.fromRGB(48, 48, 53), 0.15, 1)
 
-local DMConversation = new("ScrollingFrame", {
+DMConversation = new("ScrollingFrame", {
     Name = "Conversation",
     Position = UDim2.fromOffset(0, 41),
     Size = UDim2.new(1, 0, 1, -41),
@@ -950,7 +1016,7 @@ local DMConversation = new("ScrollingFrame", {
 new("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center}, DMConversation)
 new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 7)}, DMConversation)
 
-local DMLoading = new("TextLabel", {
+DMLoading = new("TextLabel", {
     Name = "DMLoading",
     BackgroundTransparency = 1,
     AnchorPoint = Vector2.new(0.5, 0.5),
@@ -967,7 +1033,7 @@ local DMLoading = new("TextLabel", {
 }, DMConversation)
 
 -- Composer.
-local Composer = new("Frame", {
+Composer = new("Frame", {
     Name = "Composer",
     Position = UDim2.new(0, 12, 1, -51),
     Size = UDim2.new(1, -24, 0, 38),
@@ -977,7 +1043,7 @@ local Composer = new("Frame", {
 addCorner(Composer, 999)
 addStroke(Composer, Color3.fromRGB(30, 30, 33), 0.1, 1)
 
-local Input = new("TextBox", {
+Input = new("TextBox", {
     BackgroundTransparency = 1,
     Position = UDim2.fromOffset(14, 0),
     Size = UDim2.new(1, -58, 1, 0),
@@ -993,7 +1059,7 @@ local Input = new("TextBox", {
 }, Composer)
 
 -- Sticker button opens the sticker browser.
-local StickerOpen = new("TextButton", {
+StickerOpen = new("TextButton", {
     BackgroundTransparency = 1,
     Position = UDim2.new(1, -70, 0.5, -14),
     Size = UDim2.fromOffset(28, 28),
@@ -1832,8 +1898,6 @@ saveDMIdentity()
 loadDMHistory()
 task.spawn(syncDMIncomingHistory)
 
-local ensureDMThread
-
 local function addDMCandidate(map, userId, username, displayName, source)
     userId = tonumber(userId)
     if not userId or userId == LocalPlayer.UserId then return end
@@ -2043,7 +2107,6 @@ local function loadDMCandidates()
     end)
 end
 
-local loadDMMessages
 local openMessagePopup
 local function renderDMMessage(msg)
     if not msg or not msg.key or dmSeen[msg.key] then return end
