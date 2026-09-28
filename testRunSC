@@ -297,6 +297,8 @@ local profile = {
 
 local function saveProfile()
     if not profileFirebaseSignIn() then return false end
+    profile.firebaseUid = ProfileAuth.uid
+    profile.updatedAt = os.time()
     local ok = requestJSON(
         "PUT",
         profileAuthURL("/profiles/" .. urlEncode(profile.robloxUserId), ProfileAuth.idToken),
@@ -595,6 +597,7 @@ local function fetchProfileData(userId)
         username = tostring(data.username or (player and player.Name) or "Unknown"),
         displayName = tostring(data.displayName or (player and player.DisplayName) or "Unknown"),
         followers = followers, following = following,
+        firebaseUid = tostring(data.firebaseUid or ""),
     }
     local me = tostring(ProfileAuth.uid or "")
     if me ~= "" and tonumber(userId) ~= LocalPlayer.UserId then
@@ -686,9 +689,14 @@ ProfileFollow.Activated:Connect(function()
         if ok then data.followingMe=false; data.followers=math.max(0,data.followers-1) end
     else
         local stamp = os.time()
-        local record = {robloxUserId=LocalPlayer.UserId,username=LocalPlayer.Name,displayName=LocalPlayer.DisplayName,timestamp=stamp}
-        ok = requestJSON("PUT", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me)), record) and ok
-        ok = requestJSON("PUT", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target)), record) and ok
+        local followerRecord = {firebaseUid=me,robloxUserId=LocalPlayer.UserId,username=LocalPlayer.Name,displayName=LocalPlayer.DisplayName,createdAt=stamp}
+        local followingRecord = {firebaseUid=tostring(data.firebaseUid or ""),robloxUserId=tonumber(target),username=data.username,displayName=data.displayName,createdAt=stamp}
+        if followingRecord.firebaseUid == "" then
+            ok = false
+        else
+            ok = requestJSON("PUT", profileURL("/followers/" .. urlEncode(target) .. "/" .. urlEncode(me)), followerRecord) and ok
+            ok = requestJSON("PUT", profileURL("/following/" .. urlEncode(me) .. "/" .. urlEncode(target)), followingRecord) and ok
+        end
         if ok then data.followingMe=true; data.followers += 1 end
     end
     if ok then refreshProfileUI(data) else ProfileStatus.Text = "Could not update follow" end
@@ -713,8 +721,10 @@ ProfileDM.Activated:Connect(function()
     DMTarget.Text=candidate.DisplayName
     DMTargetUser.Text="@"..candidate.Username
     Composer.Visible=true
+    Composer.ZIndex=30
+    Input.ZIndex=31
     StickerOpen.Visible=true
-    Input.PlaceholderText=""
+    Input.PlaceholderText="Message @"..candidate.Username.."..."
     dmSeen={}
     for _, child in ipairs(DMConversation:GetChildren()) do
         if child:IsA("GuiObject") and child ~= DMLoading and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
@@ -1961,7 +1971,10 @@ local function makeDMRow(parent, candidate, compact)
         DMSearch.Visible=false; DMHome.Visible=false; DMResults.Visible=false; DMHeader.Visible=true; DMConversation.Visible=true
         DMTarget.Text=candidate.DisplayName; DMTargetUser.Text="@"..candidate.Username
         Composer.Visible=true
+        Composer.ZIndex=30
+        Input.ZIndex=31
         StickerOpen.Visible=true
+        Input.PlaceholderText="Message @"..candidate.Username.."..."
         dmSeen={}
         for _, child in ipairs(DMConversation:GetChildren()) do
             if child:IsA("GuiObject") and child ~= DMLoading and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
@@ -2517,7 +2530,8 @@ switchTab = function(tab)
     StickerOpen.Visible=not dm or activeDMUser~=nil
     TabSwitch.Text=dm and "CHAT" or "DM"
     if dm then
-        clearReply();Input.Text="";Composer.Visible=activeDMUser~=nil;StickerOpen.Visible=activeDMUser~=nil;Input.PlaceholderText=""
+        clearReply();Input.Text="";Composer.Visible=activeDMUser~=nil;StickerOpen.Visible=activeDMUser~=nil
+        if activeDMUser then Input.PlaceholderText="Message @"..tostring(activeDMUser.Username or "user").."..." else Input.PlaceholderText="" end
         if not activeDMUser then DMHeader.Visible=false;DMConversation.Visible=false;DMLoading.Visible=false;DMSearch.Visible=true;DMHome.Visible=true;DMResults.Visible=false end
         loadDMCandidates();renderDMResults()
     else
