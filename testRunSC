@@ -1,5 +1,5 @@
 --[[
-SAIKI CHAT HUB v1.5 — WIDER CHAT AREA
+SAIKI CHAT HUB v1.8 — SMOOTH SELECTOR
 Client-side Luau / executor build.
 Design: soft dark surfaces, electric-blue accent, fully rounded controls,
 separate left navigation dock + main window, smooth lightweight transitions.
@@ -75,8 +75,8 @@ local C = {
     red = Color3.fromRGB(240,120,131),
 }
 
--- Total combined interface is exactly 525x375: 78px dock + 7px gap + 440px main window.
-local MAIN_W, MAIN_H = 440, 375
+-- Main window widened by 17px: 78px dock + 7px gap + 457px main = 542px total.
+local MAIN_W, MAIN_H = 457, 375
 local DOCK_W, GAP = 78, 7
 local MAX_CARDS, POLL_RATE, COOLDOWN = 50, 2.0, 3
 local activePage, activeChat, activeChannel = "Messages", "Server", "public"
@@ -343,7 +343,7 @@ combined = make("Frame", {
     Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(MAIN_W+DOCK_W+GAP,MAIN_H),
     BackgroundTransparency=1, Active=true,
 }, gui)
--- Compact 525x375 overall footprint; narrow chat selector to 55px to widen the conversation area.
+-- Compact horizontal footprint; narrow icon selector and widened main window.
 local interfaceScale = make("UIScale", {Scale=1}, combined)
 
 dock = make("Frame", {
@@ -451,16 +451,36 @@ content = make("Frame",{
 
 -- Messages page layout: compact icon-only chat-type selector (~1/4 of the original 164px width) + expanded conversation area.
 local messagesPage = make("Frame",{Name="MessagesPage",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},content)
-local SELECTOR_W = 41 -- exactly 1/4 of the original 164px selector width
+local SELECTOR_W = 41 -- one-quarter of the original 164px selector width
 local side = make("Frame",{
     Name="ChatSelector",Size=UDim2.new(0,SELECTOR_W,1,0),BackgroundColor3=C.panel,
-    BorderSizePixel=0,
+    BorderSizePixel=0,ClipsDescendants=true,
 },messagesPage)
 corner(side,17); stroke(side,C.border,.45,1)
 pad(side,2,2,6,6)
 label(side,"",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,24),TextXAlignment=Enum.TextXAlignment.Center})
 
 local renderDMContacts, updateSelectorPanels
+local serverExpanded, dmExpanded = false, false
+local selectorTweens = {}
+local function tweenSelectorPanel(panel, open, targetHeight)
+    if selectorTweens[panel] then selectorTweens[panel]:Cancel(); selectorTweens[panel]=nil end
+    if open then
+        panel.Visible=true
+        panel.ClipsDescendants=true
+        selectorTweens[panel]=TweenService:Create(panel,TweenInfo.new(.22,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{Size=UDim2.new(1,0,0,targetHeight)})
+        selectorTweens[panel]:Play()
+    elseif panel.Visible then
+        local tween=TweenService:Create(panel,TweenInfo.new(.18,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{Size=UDim2.new(1,0,0,0)})
+        selectorTweens[panel]=tween
+        tween.Completed:Connect(function()
+            if selectorTweens[panel]==tween then panel.Visible=false; selectorTweens[panel]=nil end
+        end)
+        tween:Play()
+    else
+        panel.Size=UDim2.new(1,0,0,0)
+    end
+end
 local chatTypes = make("Frame",{Position=UDim2.fromOffset(0,26),Size=UDim2.new(1,0,0,116),BackgroundTransparency=1},side)
 make("UIListLayout",{FillDirection=Enum.FillDirection.Vertical,Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},chatTypes)
 local function chatTypeButton(name, text, order)
@@ -475,15 +495,18 @@ local function chatTypeButton(name, text, order)
     b.Activated:Connect(function()
         if name=="Server" then
             if activeChat=="Server" then
-                channelGroup.Visible=not channelGroup.Visible
-                channelExpand.Text=channelGroup.Visible and "⌄" or "›"
+                serverExpanded=not serverExpanded
             else
-                activeChat="Server"; activeChannel="public"; channelGroup.Visible=true
-                channelExpand.Text="⌄"
+                activeChat="Server"; activeChannel="public"; serverExpanded=true
             end
+            dmExpanded=false
+            channelExpand.Text=serverExpanded and "⌄" or "›"
+        elseif name=="DMs" then
+            if activeChat=="DMs" then dmExpanded=not dmExpanded else dmExpanded=true end
+            activeChat="DMs"; serverExpanded=false
+            if dmExpanded then renderDMContacts() end
         else
-            activeChat=name; channelGroup.Visible=false
-            if name=="DMs" then renderDMContacts() end
+            activeChat=name; serverExpanded=false; dmExpanded=false
         end
         activeDMUser=nil; activeDMName=nil
         for n,btn in pairs(activeTabButtons) do
@@ -501,11 +524,13 @@ chatTypeButton("Global","🌐",2)
 chatTypeButton("DMs","✉️",3)
 
 channelExpand=button(side,"⌄",UDim2.new(1,0,0,26),C.raised,function()
-    channelGroup.Visible=not channelGroup.Visible
-    channelExpand.Text=channelGroup.Visible and "⌄" or "›"
+    serverExpanded=not serverExpanded
+    dmExpanded=false
+    channelExpand.Text=serverExpanded and "⌄" or "›"
+    updateSelectorPanels()
 end)
 channelExpand.Position=UDim2.fromOffset(0,143)
-channelGroup=make("Frame",{Position=UDim2.fromOffset(2,173),Size=UDim2.new(1,-2,0,76),BackgroundTransparency=1,Visible=true},side)
+channelGroup=make("Frame",{Position=UDim2.fromOffset(2,173),Size=UDim2.new(1,-2,0,0),BackgroundTransparency=1,Visible=false,ClipsDescendants=true},side)
 make("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},channelGroup)
 local function channelButton(text,key,desc)
     local b=make("TextButton",{
@@ -516,7 +541,7 @@ local function channelButton(text,key,desc)
     },channelGroup)
     corner(b,8)
     b.Activated:Connect(function()
-        activeChat="Server"; activeChannel=key; channelGroup.Visible=true
+        activeChat="Server"; activeChannel=key; serverExpanded=true; dmExpanded=false; channelExpand.Text="⌄"
         for n,btn in pairs(activeTabButtons) do
             btn.BackgroundColor3=n=="Server" and C.blueTint or C.card
             btn.TextColor3=n=="Server" and C.blue or C.sub
@@ -536,7 +561,7 @@ channelButton("Open Lounge","public","Everyone")
 channelButton("Access Lounge","access","Tier IV+")
 
 -- DM browser: searchable current-server player list. Contact history/send integration remains separate.
-local dmPanel=make("Frame",{Name="DMPanel",Position=UDim2.fromOffset(0,143),Size=UDim2.new(1,0,1,-143),BackgroundTransparency=1,Visible=false},side)
+local dmPanel=make("Frame",{Name="DMPanel",Position=UDim2.fromOffset(0,143),Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,Visible=false,ClipsDescendants=true},side)
 local dmSearch=make("TextBox",{Name="DMSearch",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.card,BorderSizePixel=0,
     Text="",PlaceholderText="⌕",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=14,
     Font=Enum.Font.Gotham,ClearTextOnFocus=false},dmPanel)
@@ -573,10 +598,11 @@ renderDMContacts=function()
 end
 updateSelectorPanels=function()
     local isServer=activeChat=="Server"
+    local isDM=activeChat=="DMs"
     channelExpand.Visible=isServer
-    channelGroup.Visible=isServer and channelGroup.Visible
-    dmPanel.Visible=activeChat=="DMs"
-    if dmPanel.Visible then renderDMContacts() end
+    tweenSelectorPanel(channelGroup,isServer and serverExpanded,76)
+    tweenSelectorPanel(dmPanel,isDM and dmExpanded,math.max(0,side.AbsoluteSize.Y-143))
+    if isDM and dmExpanded then renderDMContacts() end
 end
 dmSearch:GetPropertyChangedSignal("Text"):Connect(renderDMContacts)
 table.insert(connections,Players.PlayerAdded:Connect(function() if dmPanel.Visible then renderDMContacts() end end))
