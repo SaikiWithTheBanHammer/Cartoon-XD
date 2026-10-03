@@ -75,7 +75,8 @@ local C = {
     red = Color3.fromRGB(240,120,131),
 }
 
-local MAIN_W, MAIN_H = 680, 460
+-- Total combined interface is exactly 525x375: 78px dock + 7px gap + 440px main window.
+local MAIN_W, MAIN_H = 440, 375
 local DOCK_W, GAP = 78, 7
 local MAX_CARDS, POLL_RATE, COOLDOWN = 50, 2.0, 3
 local activePage, activeChat, activeChannel = "Messages", "Server", "public"
@@ -342,7 +343,7 @@ combined = make("Frame", {
     Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(MAIN_W+DOCK_W+GAP,MAIN_H),
     BackgroundTransparency=1, Active=true,
 }, gui)
--- Smaller overall footprint; keep the enlarged font treatment from v1.2.
+-- Compact 525x375 overall footprint; keep the enlarged font treatment from v1.2.
 local interfaceScale = make("UIScale", {Scale=1}, combined)
 
 dock = make("Frame", {
