@@ -1,5 +1,5 @@
 --[[
-SAIKI CHAT HUB v1.9 — FLYOUT CHAT CHOOSER
+SAIKI CHAT HUB v2.0 — EXPANDING CHAT SELECTOR
 Client-side Luau / executor build.
 Design: soft dark surfaces, electric-blue accent, fully rounded controls,
 separate left navigation dock + main window, smooth lightweight transitions.
@@ -449,9 +449,12 @@ content = make("Frame",{
     BackgroundTransparency=1,ClipsDescendants=true,
 },main)
 
--- Messages page layout: compact icon-only chat-type selector (~1/4 of the original 164px width) + expanded conversation area.
+-- Messages page layout: compact icon rail that smoothly widens to the original label-friendly selector width.
 local messagesPage = make("Frame",{Name="MessagesPage",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},content)
-local SELECTOR_W = 41 -- one-quarter of the original 164px selector width
+local SELECTOR_W = 41 -- collapsed icon rail
+local SELECTOR_EXPANDED_W = 164 -- original width, enough for labels and display names
+local selectorIsWide = false
+local layoutTween
 local side = make("Frame",{
     Name="ChatSelector",Size=UDim2.new(0,SELECTOR_W,1,0),BackgroundColor3=C.panel,
     BorderSizePixel=0,ClipsDescendants=true,
@@ -461,9 +464,10 @@ pad(side,2,2,6,6)
 label(side,"",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,24),TextXAlignment=Enum.TextXAlignment.Center})
 
 local renderDMContacts, updateSelectorPanels
+local conversation -- forward-declared so the selector animation can resize it
 local serverExpanded, dmExpanded = false, false
 local selectorTweens = {}
-local FLYOUT_W = 154
+local FLYOUT_W = 152
 local function tweenFlyout(panel, open, targetWidth)
     if selectorTweens[panel] then selectorTweens[panel]:Cancel(); selectorTweens[panel]=nil end
     if open then
@@ -523,12 +527,12 @@ chatTypeButton("Global","🌐",1)
 chatTypeButton("Server","📍",2)
 chatTypeButton("DMs","✉️",3)
 
--- These panels become floating flyouts over the conversation, instead of
--- consuming the narrow icon rail or permanently shrinking the chat area.
+-- Subtype lists live inside the selector. Opening a type widens the selector and
+-- gives the list enough room for full labels without covering the conversation.
 channelExpand=make("TextButton",{Name="UnusedChannelExpand",Visible=false,Size=UDim2.fromOffset(0,0),Text="",BackgroundTransparency=1},side)
-channelGroup=make("Frame",{Name="ServerTypeFlyout",Position=UDim2.new(0,SELECTOR_W+6,0,8),Size=UDim2.new(0,0,1,-16),BackgroundColor3=C.panel,BorderSizePixel=0,Visible=false,ClipsDescendants=true,ZIndex=20},messagesPage)
+channelGroup=make("Frame",{Name="ServerTypeFlyout",Position=UDim2.fromOffset(6,146),Size=UDim2.new(0,0,1,-154),BackgroundColor3=C.panel,BorderSizePixel=0,Visible=false,ClipsDescendants=true,ZIndex=20},side)
 corner(channelGroup,14); stroke(channelGroup,C.border,.2,1); pad(channelGroup,8,8,8,8)
-label(channelGroup,"SERVER CHANNELS",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,-16,0,22),Position=UDim2.fromOffset(8,7),ZIndex=21})
+label(channelGroup,"CHANNELS",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,-16,0,22),Position=UDim2.fromOffset(8,7),ZIndex=21})
 local channelButtons=make("Frame",{Position=UDim2.fromOffset(8,36),Size=UDim2.new(1,-16,0,80),BackgroundTransparency=1,ZIndex=21},channelGroup)
 make("UIListLayout",{Padding=UDim.new(0,7),SortOrder=Enum.SortOrder.LayoutOrder},channelButtons)
 local function channelButton(text,key,desc)
@@ -554,7 +558,7 @@ channelButton("#  Open Lounge","public","Everyone")
 channelButton("◇  Access Lounge","access","Tier IV+")
 
 -- DM flyout opens only when the DM icon is tapped.
-local dmPanel=make("Frame",{Name="DMTypeFlyout",Position=UDim2.new(0,SELECTOR_W+6,0,8),Size=UDim2.new(0,0,1,-16),BackgroundColor3=C.panel,BorderSizePixel=0,Visible=false,ClipsDescendants=true,ZIndex=20},messagesPage)
+local dmPanel=make("Frame",{Name="DMTypeFlyout",Position=UDim2.fromOffset(6,146),Size=UDim2.new(0,0,1,-154),BackgroundColor3=C.panel,BorderSizePixel=0,Visible=false,ClipsDescendants=true,ZIndex=20},side)
 corner(dmPanel,14); stroke(dmPanel,C.border,.2,1); pad(dmPanel,8,8,8,8)
 label(dmPanel,"DIRECT MESSAGES",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,-16,0,22),Position=UDim2.fromOffset(8,7),ZIndex=21})
 local dmSearch=make("TextBox",{Name="DMSearch",Position=UDim2.fromOffset(8,35),Size=UDim2.new(1,-16,0,30),BackgroundColor3=C.card,BorderSizePixel=0,
@@ -584,19 +588,39 @@ renderDMContacts=function()
             Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,AutoButtonColor=false,ZIndex=22},dmContacts)
         corner(b,8); pad(b,8,5,0,0)
         b.Activated:Connect(function()
-            activeChat="DMs"; activeDMUser=tostring(plr.UserId); activeDMName=plr.Name
+            activeChat="DMs"; activeDMUser=tostring(plr.UserId); activeDMName=plr.Name; dmExpanded=true; serverExpanded=false
             for n,btn in pairs(activeTabButtons) do btn.BackgroundColor3=n=="DMs" and C.blueTint or C.card; btn.TextColor3=n=="DMs" and C.blue or C.sub end
+            updateSelectorPanels()
             if _G.SaikiHubRenderChat then _G.SaikiHubRenderChat() end
             renderDMContacts()
         end)
     end
 end
 updateSelectorPanels=function()
-    local isServer=activeChat=="Server"
-    local isDM=activeChat=="DMs"
-    tweenFlyout(channelGroup,isServer and serverExpanded,FLYOUT_W)
-    tweenFlyout(dmPanel,isDM and dmExpanded,190)
-    if isDM and dmExpanded then renderDMContacts() end
+    local isServer=activeChat=="Server" and serverExpanded
+    local isDM=activeChat=="DMs" and dmExpanded
+    local shouldExpand=isServer or isDM
+    selectorIsWide=shouldExpand
+
+    if layoutTween then layoutTween:Cancel(); layoutTween=nil end
+    local targetSelectorWidth=shouldExpand and SELECTOR_EXPANDED_W or SELECTOR_W
+    local info=TweenInfo.new(.27,Enum.EasingStyle.Quint,Enum.EasingDirection.Out)
+    local selectorTween=TweenService:Create(side,info,{Size=UDim2.new(0,targetSelectorWidth,1,0)})
+    local conversationTween=TweenService:Create(conversation,info,{
+        Position=UDim2.new(0,targetSelectorWidth+6,0,0),
+        Size=UDim2.new(1,-(targetSelectorWidth+6),1,0)
+    })
+    layoutTween={Cancel=function() selectorTween:Cancel(); conversationTween:Cancel() end}
+    selectorTween:Play(); conversationTween:Play()
+
+    for name,btn in pairs(activeTabButtons) do
+        btn.Text = shouldExpand and ({Global="🌐  Global",Server="📍  Server",DMs="✉  DMs"})[name] or ({Global="🌐",Server="📍",DMs="✉️"})[name]
+        btn.TextXAlignment = shouldExpand and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
+        btn.TextSize = shouldExpand and 13 or 18
+    end
+    tweenFlyout(channelGroup,isServer,FLYOUT_W)
+    tweenFlyout(dmPanel,isDM,FLYOUT_W)
+    if isDM then renderDMContacts() end
 end
 dmSearch:GetPropertyChangedSignal("Text"):Connect(renderDMContacts)
 table.insert(connections,Players.PlayerAdded:Connect(function() if dmPanel.Visible then renderDMContacts() end end))
@@ -605,7 +629,7 @@ table.insert(connections,Players.PlayerRemoving:Connect(function(plr)
     if dmPanel.Visible then renderDMContacts() end
 end))
 
-local conversation=make("Frame",{
+conversation=make("Frame",{
     Name="Conversation",Position=UDim2.new(0,SELECTOR_W+6,0,0),Size=UDim2.new(1,-(SELECTOR_W+6),1,0),BackgroundColor3=C.panel,BorderSizePixel=0,
 },messagesPage)
 corner(conversation,17); stroke(conversation,C.border,.45,1)
