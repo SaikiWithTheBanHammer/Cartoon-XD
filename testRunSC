@@ -449,9 +449,9 @@ content = make("Frame",{
     BackgroundTransparency=1,ClipsDescendants=true,
 },main)
 
--- Messages page layout: compact server-list navigation + dedicated DM browser.
+-- Messages page layout: narrow chat-type selector (~1/3 width) + expanded conversation area + dedicated DM browser.
 local messagesPage = make("Frame",{Name="MessagesPage",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},content)
-local SELECTOR_W = 55
+local SELECTOR_W = 55 -- ~1/3 of the previous 164px selector width
 local side = make("Frame",{
     Name="ChatSelector",Size=UDim2.new(0,SELECTOR_W,1,0),BackgroundColor3=C.panel,
     BorderSizePixel=0,
@@ -476,7 +476,7 @@ local function chatTypeButton(name, text, order)
         if name=="Server" then
             if activeChat=="Server" then
                 channelGroup.Visible=not channelGroup.Visible
-                channelExpand.Text=channelGroup.Visible and "⌄  CHANNELS" or "›  CHANNELS"
+                channelExpand.Text=channelGroup.Visible and "⌄ CH" or "› CH"
             else
                 activeChat="Server"; activeChannel="public"; channelGroup.Visible=true
                 channelExpand.Text="⌄  CHANNELS"
@@ -502,7 +502,7 @@ chatTypeButton("DMs","✉ DMs",3)
 
 channelExpand=button(side,"⌄ CH",UDim2.new(1,0,0,26),C.raised,function()
     channelGroup.Visible=not channelGroup.Visible
-    channelExpand.Text=channelGroup.Visible and "⌄  CHANNELS" or "›  CHANNELS"
+    channelExpand.Text=channelGroup.Visible and "⌄ CH" or "› CH"
 end)
 channelExpand.Position=UDim2.fromOffset(0,143)
 channelGroup=make("Frame",{Position=UDim2.fromOffset(2,173),Size=UDim2.new(1,-2,0,76),BackgroundTransparency=1,Visible=true},side)
@@ -586,7 +586,7 @@ table.insert(connections,Players.PlayerRemoving:Connect(function(plr)
 end))
 
 local conversation=make("Frame",{
-    Name="Conversation",Position=UDim2.new(0,SELECTOR_W+6,0,0),Size=UDim2.new(1,-SELECTOR_W-6,1,0),BackgroundColor3=C.panel,BorderSizePixel=0,
+    Name="Conversation",Position=UDim2.new(0,SELECTOR_W+6,0,0),Size=UDim2.new(1,-(SELECTOR_W+6),1,0),BackgroundColor3=C.panel,BorderSizePixel=0,
 },messagesPage)
 corner(conversation,17); stroke(conversation,C.border,.45,1)
 pad(conversation,9,9,8,8)
