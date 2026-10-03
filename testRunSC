@@ -1,5 +1,5 @@
 --[[
-SAIKI CHAT HUB v1.3 — SMALLER GUI BUILD
+SAIKI CHAT HUB v1.5 — WIDER CHAT AREA
 Client-side Luau / executor build.
 Design: soft dark surfaces, electric-blue accent, fully rounded controls,
 separate left navigation dock + main window, smooth lightweight transitions.
@@ -343,7 +343,7 @@ combined = make("Frame", {
     Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(MAIN_W+DOCK_W+GAP,MAIN_H),
     BackgroundTransparency=1, Active=true,
 }, gui)
--- Compact 525x375 overall footprint; keep the enlarged font treatment from v1.2.
+-- Compact 525x375 overall footprint; narrow chat selector to 55px to widen the conversation area.
 local interfaceScale = make("UIScale", {Scale=1}, combined)
 
 dock = make("Frame", {
@@ -451,27 +451,27 @@ content = make("Frame",{
 
 -- Messages page layout: compact server-list navigation + dedicated DM browser.
 local messagesPage = make("Frame",{Name="MessagesPage",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},content)
-local SELECTOR_W = 164
+local SELECTOR_W = 55
 local side = make("Frame",{
     Name="ChatSelector",Size=UDim2.new(0,SELECTOR_W,1,0),BackgroundColor3=C.panel,
     BorderSizePixel=0,
 },messagesPage)
 corner(side,17); stroke(side,C.border,.45,1)
-pad(side,10,10,10,10)
-label(side,"MESSAGES",12,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,24)})
+pad(side,3,3,6,6)
+label(side,"CHATS",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,24),TextXAlignment=Enum.TextXAlignment.Center})
 
 local renderDMContacts, updateSelectorPanels
-local chatTypes = make("Frame",{Position=UDim2.fromOffset(0,30),Size=UDim2.new(1,0,0,116),BackgroundTransparency=1},side)
+local chatTypes = make("Frame",{Position=UDim2.fromOffset(0,26),Size=UDim2.new(1,0,0,116),BackgroundTransparency=1},side)
 make("UIListLayout",{FillDirection=Enum.FillDirection.Vertical,Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},chatTypes)
 local function chatTypeButton(name, text, order)
     local b=make("TextButton",{
         Name=name.."Selector",LayoutOrder=order,Size=UDim2.new(1,0,0,34),
         BackgroundColor3=name==activeChat and C.blueTint or C.card,
         BorderSizePixel=0,Text=text,TextColor3=name==activeChat and C.blue or C.sub,
-        TextSize=17,Font=Enum.Font.GothamSemibold,TextXAlignment=Enum.TextXAlignment.Left,
+        TextSize=11,TextScaled=false,Font=Enum.Font.GothamSemibold,TextXAlignment=Enum.TextXAlignment.Center,
         AutoButtonColor=false,
     },chatTypes)
-    pad(b,12,8,0,0); corner(b,11)
+    pad(b,1,1,0,0); corner(b,9)
     b.Activated:Connect(function()
         if name=="Server" then
             if activeChat=="Server" then
@@ -496,25 +496,25 @@ local function chatTypeButton(name, text, order)
     activeTabButtons[name]=b
     return b
 end
-chatTypeButton("Server","▾   Server",1)
-chatTypeButton("Global","◎   Global Chat",2)
-chatTypeButton("DMs","✉   Direct Messages",3)
+chatTypeButton("Server","▾ Server",1)
+chatTypeButton("Global","◎ Global",2)
+chatTypeButton("DMs","✉ DMs",3)
 
-channelExpand=button(side,"⌄  CHANNELS",UDim2.new(1,0,0,30),C.raised,function()
+channelExpand=button(side,"⌄ CH",UDim2.new(1,0,0,26),C.raised,function()
     channelGroup.Visible=not channelGroup.Visible
     channelExpand.Text=channelGroup.Visible and "⌄  CHANNELS" or "›  CHANNELS"
 end)
-channelExpand.Position=UDim2.fromOffset(0,151)
-channelGroup=make("Frame",{Position=UDim2.fromOffset(8,187),Size=UDim2.new(1,-8,0,76),BackgroundTransparency=1,Visible=true},side)
+channelExpand.Position=UDim2.fromOffset(0,143)
+channelGroup=make("Frame",{Position=UDim2.fromOffset(2,173),Size=UDim2.new(1,-2,0,76),BackgroundTransparency=1,Visible=true},side)
 make("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},channelGroup)
 local function channelButton(text,key,desc)
     local b=make("TextButton",{
         Size=UDim2.new(1,0,0,34),BackgroundColor3=key==activeChannel and C.blueTint or C.card,
-        BorderSizePixel=0,Text="   #  "..text,TextColor3=key==activeChannel and C.blue or C.sub,
-        TextSize=16,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,
+        BorderSizePixel=0,Text=(key=="public" and "# Open" or "# Access"),TextColor3=key==activeChannel and C.blue or C.sub,
+        TextSize=10,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Center,
         AutoButtonColor=false,
     },channelGroup)
-    corner(b,10)
+    corner(b,8)
     b.Activated:Connect(function()
         activeChat="Server"; activeChannel=key; channelGroup.Visible=true
         for n,btn in pairs(activeTabButtons) do
@@ -536,12 +536,12 @@ channelButton("Open Lounge","public","Everyone")
 channelButton("Access Lounge","access","Tier IV+")
 
 -- DM browser: searchable current-server player list. Contact history/send integration remains separate.
-local dmPanel=make("Frame",{Name="DMPanel",Position=UDim2.fromOffset(0,151),Size=UDim2.new(1,0,1,-151),BackgroundTransparency=1,Visible=false},side)
-local dmSearch=make("TextBox",{Name="DMSearch",Size=UDim2.new(1,0,0,34),BackgroundColor3=C.card,BorderSizePixel=0,
-    Text="",PlaceholderText="Search people…",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=16,
+local dmPanel=make("Frame",{Name="DMPanel",Position=UDim2.fromOffset(0,143),Size=UDim2.new(1,0,1,-143),BackgroundTransparency=1,Visible=false},side)
+local dmSearch=make("TextBox",{Name="DMSearch",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.card,BorderSizePixel=0,
+    Text="",PlaceholderText="Find…",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=10,
     Font=Enum.Font.Gotham,ClearTextOnFocus=false},dmPanel)
 corner(dmSearch,10); pad(dmSearch,10,8,0,0)
-local dmContacts=make("ScrollingFrame",{Name="DMContacts",Position=UDim2.fromOffset(0,42),Size=UDim2.new(1,0,1,-42),
+local dmContacts=make("ScrollingFrame",{Name="DMContacts",Position=UDim2.fromOffset(0,36),Size=UDim2.new(1,0,1,-36),
     BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=C.border,CanvasSize=UDim2.new(0,0,0,0)},dmPanel)
 local dmLayout=make("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},dmContacts)
 dmLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() dmContacts.CanvasSize=UDim2.fromOffset(0,dmLayout.AbsoluteContentSize.Y+5) end)
@@ -558,11 +558,11 @@ renderDMContacts=function()
         return
     end
     for i,plr in ipairs(list) do
-        local b=make("TextButton",{Name="DM_"..plr.UserId,LayoutOrder=i,Size=UDim2.new(1,0,0,46),
+        local b=make("TextButton",{Name="DM_"..plr.UserId,LayoutOrder=i,Size=UDim2.new(1,0,0,42),
             BackgroundColor3=(tostring(activeDMUser)==tostring(plr.UserId)) and C.blueTint or C.card,
-            BorderSizePixel=0,Text=plr.DisplayName.."\n@"..plr.Name,TextColor3=C.text,TextSize=14,
+            BorderSizePixel=0,Text=plr.DisplayName,TextColor3=C.text,TextSize=10,
             Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,AutoButtonColor=false},dmContacts)
-        corner(b,11); pad(b,10,5,0,0)
+        corner(b,8); pad(b,2,2,0,0)
         b.Activated:Connect(function()
             activeChat="DMs"; activeDMUser=tostring(plr.UserId); activeDMName=plr.Name
             for n,btn in pairs(activeTabButtons) do btn.BackgroundColor3=n=="DMs" and C.blueTint or C.card; btn.TextColor3=n=="DMs" and C.blue or C.sub end
@@ -586,10 +586,10 @@ table.insert(connections,Players.PlayerRemoving:Connect(function(plr)
 end))
 
 local conversation=make("Frame",{
-    Name="Conversation",Position=UDim2.new(0,SELECTOR_W+10,0,0),Size=UDim2.new(1,-SELECTOR_W-10,1,0),BackgroundColor3=C.panel,BorderSizePixel=0,
+    Name="Conversation",Position=UDim2.new(0,SELECTOR_W+6,0,0),Size=UDim2.new(1,-SELECTOR_W-6,1,0),BackgroundColor3=C.panel,BorderSizePixel=0,
 },messagesPage)
 corner(conversation,17); stroke(conversation,C.border,.45,1)
-pad(conversation,13,13,11,11)
+pad(conversation,9,9,8,8)
 local convHeader=make("Frame",{Size=UDim2.new(1,0,0,42),BackgroundTransparency=1},conversation)
 chatTitle=label(convHeader,"Open Lounge",14,C.text,Enum.Font.GothamBold,{Size=UDim2.new(1,-8,0,22),Position=UDim2.fromOffset(0,0)})
 chatSubtitle=label(convHeader,"Server-only • same Roblox server",11,C.sub,Enum.Font.Gotham,{Size=UDim2.new(1,-8,0,17),Position=UDim2.fromOffset(0,22)})
