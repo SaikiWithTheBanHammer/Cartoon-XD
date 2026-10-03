@@ -1,5 +1,5 @@
 --[[
-SAIKI CHAT HUB v2.0 — EXPANDING CHAT SELECTOR
+SAIKI CHAT HUB v2.1 — AUTO-COLLAPSING CHAT SELECTOR
 Client-side Luau / executor build.
 Design: soft dark surfaces, electric-blue accent, fully rounded controls,
 separate left navigation dock + main window, smooth lightweight transitions.
@@ -669,6 +669,31 @@ local sendButton=button(composerFrame,"SEND",UDim2.fromOffset(44,36),C.blue,func
 end)
 sendButton.TextColor3=Color3.fromRGB(10,15,25)
 sendButton.Position=UDim2.new(1,-45,0,9)
+
+-- Clicking/tapping the conversation (including the message box) smoothly collapses
+-- the expanded selector. Keep the selected chat/channel unchanged.
+local function collapseSelectorFromConversation()
+    if not selectorIsWide then return end
+    serverExpanded=false
+    dmExpanded=false
+    updateSelectorPanels()
+end
+
+local function watchConversationInteraction(obj)
+    if not obj:IsA("GuiObject") then return end
+    obj.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1
+            or input.UserInputType==Enum.UserInputType.Touch then
+            collapseSelectorFromConversation()
+        end
+    end)
+end
+for _,obj in ipairs(conversation:GetDescendants()) do
+    watchConversationInteraction(obj)
+end
+conversation.DescendantAdded:Connect(watchConversationInteraction)
+-- TextBox focus is a reliable touch/keyboard fallback for the message composer.
+inputBox.Focused:Connect(collapseSelectorFromConversation)
 
 -- Other pages
 local otherPages={}
