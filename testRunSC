@@ -280,7 +280,7 @@ local function label(parent, text, size, color, font, props)
     props.BackgroundTransparency = 1
     props.Text = text
     props.TextColor3 = color or C.text
-    props.TextSize = size or 13
+    props.TextSize = math.floor((size or 13) * 1.30 + 0.5)
     props.Font = font or Enum.Font.Gotham
     props.TextXAlignment = props.TextXAlignment or Enum.TextXAlignment.Left
     props.TextYAlignment = props.TextYAlignment or Enum.TextYAlignment.Center
@@ -290,7 +290,7 @@ end
 local function button(parent, text, size, color, callback)
     local b = make("TextButton", {
         Size=size, BackgroundColor3=color or C.card, BorderSizePixel=0,
-        Text=text, TextColor3=C.text, TextSize=13, Font=Enum.Font.GothamMedium,
+        Text=text, TextColor3=C.text, TextSize=17, Font=Enum.Font.GothamMedium,
         AutoButtonColor=false, Active=true,
     }, parent)
     corner(b, 12)
@@ -310,7 +310,7 @@ local function toast(message, isError)
     local t = make("TextLabel", {
         AnchorPoint=Vector2.new(0.5,1), Position=UDim2.new(0.5,0,1,-16),
         Size=UDim2.fromOffset(330,34), BackgroundColor3=isError and Color3.fromRGB(65,30,38) or C.raised,
-        Text=message, TextColor3=C.text, TextSize=11, Font=Enum.Font.GothamMedium,
+        Text=message, TextColor3=C.text, TextSize=14, Font=Enum.Font.GothamMedium,
         BorderSizePixel=0, ZIndex=100, TextWrapped=true,
     }, main)
     corner(t, 12); stroke(t, isError and C.red or C.border, .25, 1)
@@ -342,6 +342,8 @@ combined = make("Frame", {
     Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(MAIN_W+DOCK_W+GAP,MAIN_H),
     BackgroundTransparency=1, Active=true,
 }, gui)
+-- Compact overall footprint; fonts are enlarged below so the UI remains readable.
+local interfaceScale = make("UIScale", {Scale=0.85}, combined)
 
 dock = make("Frame", {
     Name="NavigationDock", Position=UDim2.fromOffset(0,0), Size=UDim2.fromOffset(DOCK_W,MAIN_H),
@@ -421,7 +423,7 @@ end
 for i,def in ipairs(navDefs) do
     local b = make("TextButton",{
         Name=def.name,Size=UDim2.fromOffset(78,44),BackgroundColor3=C.dock,
-        BorderSizePixel=0,Text=def.name:upper(),TextColor3=C.sub,TextSize=11,
+        BorderSizePixel=0,Text=def.name:upper(),TextColor3=C.sub,TextSize=14,
         Font=Enum.Font.GothamBold,AutoButtonColor=false,LayoutOrder=i,
     },dockList)
     corner(b,14); stroke(b,C.border,1,1)
@@ -465,7 +467,7 @@ local function chatTypeButton(name, text, order)
         Name=name.."Selector",LayoutOrder=order,Size=UDim2.new(1,0,0,34),
         BackgroundColor3=name==activeChat and C.blueTint or C.card,
         BorderSizePixel=0,Text=text,TextColor3=name==activeChat and C.blue or C.sub,
-        TextSize=13,Font=Enum.Font.GothamSemibold,TextXAlignment=Enum.TextXAlignment.Left,
+        TextSize=17,Font=Enum.Font.GothamSemibold,TextXAlignment=Enum.TextXAlignment.Left,
         AutoButtonColor=false,
     },chatTypes)
     pad(b,12,8,0,0); corner(b,11)
@@ -508,7 +510,7 @@ local function channelButton(text,key,desc)
     local b=make("TextButton",{
         Size=UDim2.new(1,0,0,34),BackgroundColor3=key==activeChannel and C.blueTint or C.card,
         BorderSizePixel=0,Text="   #  "..text,TextColor3=key==activeChannel and C.blue or C.sub,
-        TextSize=12,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,
+        TextSize=16,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,
         AutoButtonColor=false,
     },channelGroup)
     corner(b,10)
@@ -535,7 +537,7 @@ channelButton("Access Lounge","access","Tier IV+")
 -- DM browser: searchable current-server player list. Contact history/send integration remains separate.
 local dmPanel=make("Frame",{Name="DMPanel",Position=UDim2.fromOffset(0,151),Size=UDim2.new(1,0,1,-151),BackgroundTransparency=1,Visible=false},side)
 local dmSearch=make("TextBox",{Name="DMSearch",Size=UDim2.new(1,0,0,34),BackgroundColor3=C.card,BorderSizePixel=0,
-    Text="",PlaceholderText="Search people…",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=12,
+    Text="",PlaceholderText="Search people…",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=16,
     Font=Enum.Font.Gotham,ClearTextOnFocus=false},dmPanel)
 corner(dmSearch,10); pad(dmSearch,10,8,0,0)
 local dmContacts=make("ScrollingFrame",{Name="DMContacts",Position=UDim2.fromOffset(0,42),Size=UDim2.new(1,0,1,-42),
@@ -557,7 +559,7 @@ renderDMContacts=function()
     for i,plr in ipairs(list) do
         local b=make("TextButton",{Name="DM_"..plr.UserId,LayoutOrder=i,Size=UDim2.new(1,0,0,46),
             BackgroundColor3=(tostring(activeDMUser)==tostring(plr.UserId)) and C.blueTint or C.card,
-            BorderSizePixel=0,Text=plr.DisplayName.."\n@"..plr.Name,TextColor3=C.text,TextSize=11,
+            BorderSizePixel=0,Text=plr.DisplayName.."\n@"..plr.Name,TextColor3=C.text,TextSize=14,
             Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,AutoButtonColor=false},dmContacts)
         corner(b,11); pad(b,10,5,0,0)
         b.Activated:Connect(function()
@@ -609,7 +611,7 @@ corner(composerFrame,15); stroke(composerFrame,C.border,.25,1)
 inputBox=make("TextBox",{
     Name="MessageInput",Position=UDim2.fromOffset(12,7),Size=UDim2.new(1,-104,1,-14),
     BackgroundTransparency=1,BorderSizePixel=0,Text="",PlaceholderText="Message Open Lounge…",
-    PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=13,Font=Enum.Font.Gotham,
+    PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=17,Font=Enum.Font.Gotham,
     TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,
     TextWrapped=true,MultiLine=true,
 },composerFrame)
@@ -936,7 +938,7 @@ _G.SaikiHubOpenStickers=function()
     end
     for _,def in ipairs(STICKER_REPOS) do
         local b=button(cats,def.name:gsub("%-XD",""),UDim2.fromOffset(84,27),C.card,function() loadCategory(def.repo) end)
-        b.TextSize=9; b.ZIndex=31
+        b.TextSize=12; b.ZIndex=31
     end
     loadCategory(currentStickerCategory)
 end
