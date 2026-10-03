@@ -449,16 +449,16 @@ content = make("Frame",{
     BackgroundTransparency=1,ClipsDescendants=true,
 },main)
 
--- Messages page layout: narrow chat-type selector (~1/3 width) + expanded conversation area + dedicated DM browser.
+-- Messages page layout: compact icon-only chat-type selector (~1/4 of the original 164px width) + expanded conversation area.
 local messagesPage = make("Frame",{Name="MessagesPage",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},content)
-local SELECTOR_W = 55 -- ~1/3 of the previous 164px selector width
+local SELECTOR_W = 41 -- exactly 1/4 of the original 164px selector width
 local side = make("Frame",{
     Name="ChatSelector",Size=UDim2.new(0,SELECTOR_W,1,0),BackgroundColor3=C.panel,
     BorderSizePixel=0,
 },messagesPage)
 corner(side,17); stroke(side,C.border,.45,1)
-pad(side,3,3,6,6)
-label(side,"CHATS",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,24),TextXAlignment=Enum.TextXAlignment.Center})
+pad(side,2,2,6,6)
+label(side,"",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,24),TextXAlignment=Enum.TextXAlignment.Center})
 
 local renderDMContacts, updateSelectorPanels
 local chatTypes = make("Frame",{Position=UDim2.fromOffset(0,26),Size=UDim2.new(1,0,0,116),BackgroundTransparency=1},side)
@@ -468,7 +468,7 @@ local function chatTypeButton(name, text, order)
         Name=name.."Selector",LayoutOrder=order,Size=UDim2.new(1,0,0,34),
         BackgroundColor3=name==activeChat and C.blueTint or C.card,
         BorderSizePixel=0,Text=text,TextColor3=name==activeChat and C.blue or C.sub,
-        TextSize=11,TextScaled=false,Font=Enum.Font.GothamSemibold,TextXAlignment=Enum.TextXAlignment.Center,
+        TextSize=18,TextScaled=false,Font=Enum.Font.GothamSemibold,TextXAlignment=Enum.TextXAlignment.Center,
         AutoButtonColor=false,
     },chatTypes)
     pad(b,1,1,0,0); corner(b,9)
@@ -476,10 +476,10 @@ local function chatTypeButton(name, text, order)
         if name=="Server" then
             if activeChat=="Server" then
                 channelGroup.Visible=not channelGroup.Visible
-                channelExpand.Text=channelGroup.Visible and "⌄ CH" or "› CH"
+                channelExpand.Text=channelGroup.Visible and "⌄" or "›"
             else
                 activeChat="Server"; activeChannel="public"; channelGroup.Visible=true
-                channelExpand.Text="⌄  CHANNELS"
+                channelExpand.Text="⌄"
             end
         else
             activeChat=name; channelGroup.Visible=false
@@ -496,13 +496,13 @@ local function chatTypeButton(name, text, order)
     activeTabButtons[name]=b
     return b
 end
-chatTypeButton("Server","▾ Server",1)
-chatTypeButton("Global","◎ Global",2)
-chatTypeButton("DMs","✉ DMs",3)
+chatTypeButton("Server","📍",1)
+chatTypeButton("Global","🌐",2)
+chatTypeButton("DMs","✉️",3)
 
-channelExpand=button(side,"⌄ CH",UDim2.new(1,0,0,26),C.raised,function()
+channelExpand=button(side,"⌄",UDim2.new(1,0,0,26),C.raised,function()
     channelGroup.Visible=not channelGroup.Visible
-    channelExpand.Text=channelGroup.Visible and "⌄ CH" or "› CH"
+    channelExpand.Text=channelGroup.Visible and "⌄" or "›"
 end)
 channelExpand.Position=UDim2.fromOffset(0,143)
 channelGroup=make("Frame",{Position=UDim2.fromOffset(2,173),Size=UDim2.new(1,-2,0,76),BackgroundTransparency=1,Visible=true},side)
@@ -510,8 +510,8 @@ make("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder}
 local function channelButton(text,key,desc)
     local b=make("TextButton",{
         Size=UDim2.new(1,0,0,34),BackgroundColor3=key==activeChannel and C.blueTint or C.card,
-        BorderSizePixel=0,Text=(key=="public" and "# Open" or "# Access"),TextColor3=key==activeChannel and C.blue or C.sub,
-        TextSize=10,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Center,
+        BorderSizePixel=0,Text=(key=="public" and "#" or "◇"),TextColor3=key==activeChannel and C.blue or C.sub,
+        TextSize=15,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Center,
         AutoButtonColor=false,
     },channelGroup)
     corner(b,8)
@@ -538,7 +538,7 @@ channelButton("Access Lounge","access","Tier IV+")
 -- DM browser: searchable current-server player list. Contact history/send integration remains separate.
 local dmPanel=make("Frame",{Name="DMPanel",Position=UDim2.fromOffset(0,143),Size=UDim2.new(1,0,1,-143),BackgroundTransparency=1,Visible=false},side)
 local dmSearch=make("TextBox",{Name="DMSearch",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.card,BorderSizePixel=0,
-    Text="",PlaceholderText="Find…",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=10,
+    Text="",PlaceholderText="⌕",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=14,
     Font=Enum.Font.Gotham,ClearTextOnFocus=false},dmPanel)
 corner(dmSearch,10); pad(dmSearch,10,8,0,0)
 local dmContacts=make("ScrollingFrame",{Name="DMContacts",Position=UDim2.fromOffset(0,36),Size=UDim2.new(1,0,1,-36),
