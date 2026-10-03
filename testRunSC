@@ -1,1 +1,1110 @@
+--[[
+SAIKI CHAT HUB v2.2 — SELECTOR CLICK COLLAPSE
+Client-side Luau / executor build.
+Design: soft dark surfaces, electric-blue accent, fully rounded controls,
+separate left navigation dock + main window, smooth lightweight transitions.
 
+Included in this foundation:
+  * Responsive draggable combined dock/window
+  * Messages / People / Profiles / Notifications / Settings navigation
+  * Server / Global / DMs selector with expandable Server channels
+  * Firebase anonymous authentication (legacy Saiki Chat database)
+  * End-to-end Server Open Lounge text chat, last-50 rendering, 3s cooldown
+  * Global/DM views wired to their paths, using conservative polling
+  * GitHub sticker repository discovery + persistent local cache (executor APIs)
+  * Roblox avatar thumbnails and profile picture ID mapping scaffold
+  * Toggle descriptions, low-power setting, unload cleanup
+
+Important:
+  * Assumes an executor with request, loadstring, and optional file APIs.
+  * Client-side cooldowns/identity checks are not security boundaries.
+  * Firebase rules must permit the intended authenticated reads/writes.
+  * This is a foundation release; social follow actions, tier permissions,
+    announcement publishing, aura model mounting, and full DM contact discovery
+    are intentionally left for the next integration pass rather than faked.
+]]
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- ===== Configuration: original Saiki Firebase + assets =====
+local FIREBASE_DB = "https://sxkicxat-default-rtdb.asia-southeast1.firebasedatabase.app"
+local FIREBASE_API_KEY = "AIzaSyCgvkvar8qhD3zqYC83BW6GHxGQVYoDhrM"
+local DM_FIREBASE_DB = "https://sxkidirect-default-rtdb.asia-southeast1.firebasedatabase.app"
+local DM_FIREBASE_API_KEY = "AIzaSyALza0_s-MNzaYMrH15WJGAZMJ_RYW4"
+
+local GITHUB_OWNER = "SaikiWithTheBanHammer"
+local ASSET_REPO = "ScriptBlox"
+local HIDE_BUTTON_URL = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/SchatButton.jpg"
+local SEND_ICON_URL = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/SendIcon.jpg"
+local LOGO_URL = "https://raw.githubusercontent.com/SaikiWithTheBanHammer/ScriptBlox/main/icon%20Kusuo%20Saiki.jpg"
+local CACHE = "SaikiChatHubCache"
+local STICKER_CACHE = CACHE .. "/stickers"
+local PFP_CACHE = CACHE .. "/pfp"
+
+local STICKER_REPOS = {
+    {name="Joined-XD", repo="Joined-XD"},
+    {name="Drawing-XD", repo="Drawing-XD"},
+    {name="Cartoon-XD", repo="Cartoon-XD"},
+    {name="Anime-XD", repo="Anime-XD"},
+    {name="Saiki-XD", repo="Saiki-XD"},
+    {name="CAT-DOG-XD", repo="CAT-DOG-XD"},
+    {name="Misclaneous-XD", repo="Misclaneous-XD"},
+}
+
+local C = {
+    bg = Color3.fromRGB(11,12,16),
+    dock = Color3.fromRGB(15,17,23),
+    panel = Color3.fromRGB(18,20,27),
+    card = Color3.fromRGB(25,27,35),
+    raised = Color3.fromRGB(33,36,46),
+    border = Color3.fromRGB(45,49,61),
+    text = Color3.fromRGB(244,246,251),
+    sub = Color3.fromRGB(146,153,168),
+    blue = Color3.fromRGB(121,167,255),
+    blueHover = Color3.fromRGB(155,190,255),
+    blueTint = Color3.fromRGB(24,41,74),
+    green = Color3.fromRGB(117,214,161),
+    red = Color3.fromRGB(240,120,131),
+}
+
+-- Main window widened by 17px: 78px dock + 7px gap + 457px main = 542px total.
+local MAIN_W, MAIN_H = 457, 375
+local DOCK_W, GAP = 78, 7
+local MAX_CARDS, POLL_RATE, COOLDOWN = 50, 2.0, 3
+local activePage, activeChat, activeChannel = "Messages", "Server", "public"
+local activeDMUser, activeDMName = nil, nil
+local auth, dmAuth = {token=nil, refresh=nil, uid=nil}, {token=nil, refresh=nil, uid=nil}
+local connections, cards, seen, settingsState = {}, {}, {}, {}
+local lastSend = 0
+local alive = true
+local currentStickerCategory = STICKER_REPOS[1].repo
+local stickerItems = {}
+local replyTo = nil
+local minimized = false
+local anchored = false
+local dragging, dragStart, startPos = false, nil, nil
+local gui, combined, main, dock, content, messageList, composer, inputBox
+local statusLabel, chatTitle, chatSubtitle, channelGroup, channelExpand
+local activeTabButtons = {}
+local pageButtons = {}
+local cardPool = {}
+local refreshMessages
+
+local function getRequest()
+    return request or http_request or (syn and syn.request) or (fluxus and fluxus.request)
+end
+local REQUEST = getRequest()
+assert(REQUEST, "Saiki Chat Hub: no executor HTTP request function found (request/http_request).")
+
+local function requestJSON(method, url, body, extraHeaders)
+    local opts = {
+        Url = url, Method = method,
+        Headers = {["Content-Type"]="application/json"},
+    }
+    if extraHeaders then
+        for k,v in pairs(extraHeaders) do opts.Headers[k] = v end
+    end
+    if body ~= nil then opts.Body = HttpService:JSONEncode(body) end
+    local ok, res = pcall(REQUEST, opts)
+    if not ok or not res then return false, nil, tostring(res) end
+    local code = tonumber(res.StatusCode or res.Status or 0) or 0
+    local raw = res.Body or res.body or ""
+    local decoded
+    if raw ~= "" then pcall(function() decoded = HttpService:JSONDecode(raw) end) end
+    return code >= 200 and code < 300, decoded, raw, code
+end
+
+local function enc(v) return HttpService:UrlEncode(tostring(v)) end
+local function dbURL(base, path, token, extra)
+    local url = base .. path .. ".json"
+    local query = {}
+    if token and token ~= "" then table.insert(query, "auth=" .. enc(token)) end
+    if extra and extra ~= "" then table.insert(query, extra) end
+    if #query > 0 then url = url .. "?" .. table.concat(query, "&") end
+    return url
+end
+
+local function firebaseAuth(target)
+    local key = target == dmAuth and DM_FIREBASE_API_KEY or FIREBASE_API_KEY
+    local ok, data, raw = requestJSON("POST",
+        "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" .. key,
+        {returnSecureToken=true})
+    if ok and type(data) == "table" and data.idToken then
+        target.token, target.refresh, target.uid = data.idToken, data.refreshToken, data.localId
+        return true
+    end
+    warn("[SAIKI CHAT] Firebase anonymous auth failed: " .. tostring(raw))
+    return false
+end
+
+local function refreshFirebaseAuth(target)
+    if not target.refresh then return firebaseAuth(target) end
+    local key = target == dmAuth and DM_FIREBASE_API_KEY or FIREBASE_API_KEY
+    local ok, data = requestJSON("POST",
+        "https://securetoken.googleapis.com/v1/token?key=" .. key,
+        "grant_type=refresh_token&refresh_token=" .. enc(target.refresh),
+        {["Content-Type"]="application/x-www-form-urlencoded"})
+    -- Some executor request wrappers JSON-encode Body automatically; retry as raw form body.
+    if not ok then
+        local opts = {
+            Url = "https://securetoken.googleapis.com/v1/token?key=" .. key,
+            Method = "POST",
+            Headers = {["Content-Type"]="application/x-www-form-urlencoded"},
+            Body = "grant_type=refresh_token&refresh_token=" .. enc(target.refresh),
+        }
+        local good, res = pcall(REQUEST, opts)
+        if good and res and (tonumber(res.StatusCode or res.Status or 0) or 0) == 200 then
+            pcall(function() data = HttpService:JSONDecode(res.Body or res.body or "") end)
+            ok = type(data) == "table" and data.id_token ~= nil
+        end
+    end
+    if ok and type(data) == "table" then
+        target.token = data.id_token or data.idToken or target.token
+        target.refresh = data.refresh_token or data.refreshToken or target.refresh
+        target.uid = data.user_id or data.localId or target.uid
+        return true
+    end
+    return firebaseAuth(target)
+end
+
+local function dbRequest(method, path, body, target, base, extra)
+    target = target or auth
+    base = base or FIREBASE_DB
+    if not target.token then
+        if not firebaseAuth(target) then return false, nil, "Firebase auth unavailable" end
+    end
+    local ok, data, raw, code = requestJSON(method, dbURL(base, path, target.token, extra), body)
+    if code == 401 then
+        if refreshFirebaseAuth(target) then
+            ok, data, raw, code = requestJSON(method, dbURL(base, path, target.token, extra), body)
+        end
+    end
+    return ok, data, raw, code
+end
+
+-- ===== Optional persistent asset cache =====
+local function ensureFolder(path)
+    if not makefolder then return end
+    local current = ""
+    for part in string.gmatch(path, "[^/]+") do
+        current = current == "" and part or (current .. "/" .. part)
+        if isfolder then
+            if not isfolder(current) then pcall(makefolder, current) end
+        else
+            pcall(makefolder, current)
+        end
+    end
+end
+ensureFolder(CACHE)
+ensureFolder(STICKER_CACHE)
+ensureFolder(PFP_CACHE)
+
+local function safeName(s)
+    return (tostring(s):gsub("[^%w_%-%.]", "_"))
+end
+
+local function cachedAsset(url, path)
+    if not (writefile and isfile and getcustomasset) then return nil end
+    if not isfile(path) then
+        local ok, data = pcall(function()
+            local response = REQUEST({Url=url, Method="GET"})
+            if response and (tonumber(response.StatusCode or response.Status or 0) or 0) >= 200
+                and (tonumber(response.StatusCode or response.Status or 0) or 0) < 300 then
+                return response.Body or response.body
+            end
+            return nil
+        end)
+        if ok and type(data) == "string" and #data > 0 then pcall(writefile, path, data) end
+    end
+    if isfile(path) then
+        local ok, asset = pcall(getcustomasset, path)
+        if ok then return asset end
+    end
+    return nil
+end
+
+local function githubContents(repo, path)
+    local url = "https://api.github.com/repos/" .. GITHUB_OWNER .. "/" .. repo .. "/contents"
+    if path and path ~= "" then url = url .. "/" .. path end
+    local ok, data = requestJSON("GET", url, nil, {["Accept"]="application/vnd.github+json"})
+    if ok and type(data) == "table" then return data end
+    return nil
+end
+
+local function getPfpAsset(id)
+    id = math.clamp(tonumber(id) or 1, 1, 100)
+    local file = string.format("%03d.png", id)
+    local url = "https://raw.githubusercontent.com/" .. GITHUB_OWNER .. "/" .. ASSET_REPO .. "/main/pfp/" .. file
+    return cachedAsset(url, PFP_CACHE .. "/" .. file)
+end
+
+local function getRobloxAvatar(userId, size)
+    local url = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=" ..
+        enc(userId) .. "&size=" .. (size or "150x150") .. "&format=Png&isCircular=true"
+    local ok, data = requestJSON("GET", url)
+    if ok and data and data.data and data.data[1] then return data.data[1].imageUrl end
+    return ""
+end
+
+-- ===== UI helpers =====
+local function make(class, props, parent)
+    local obj = Instance.new(class)
+    for k,v in pairs(props or {}) do obj[k] = v end
+    obj.Parent = parent
+    return obj
+end
+local function corner(obj, radius)
+    make("UICorner", {CornerRadius=UDim.new(0, radius or 14)}, obj)
+end
+local function stroke(obj, color, transparency, thickness)
+    return make("UIStroke", {
+        Color=color or C.border, Transparency=transparency or 0,
+        Thickness=thickness or 1, ApplyStrokeMode=Enum.ApplyStrokeMode.Border,
+    }, obj)
+end
+local function pad(obj, l, r, t, b)
+    make("UIPadding", {
+        PaddingLeft=UDim.new(0,l or 0), PaddingRight=UDim.new(0,r or 0),
+        PaddingTop=UDim.new(0,t or 0), PaddingBottom=UDim.new(0,b or 0),
+    }, obj)
+end
+local function label(parent, text, size, color, font, props)
+    props = props or {}
+    props.BackgroundTransparency = 1
+    props.Text = text
+    props.TextColor3 = color or C.text
+    props.TextSize = math.floor((size or 13) * 1.30 + 0.5)
+    props.Font = font or Enum.Font.Gotham
+    props.TextXAlignment = props.TextXAlignment or Enum.TextXAlignment.Left
+    props.TextYAlignment = props.TextYAlignment or Enum.TextYAlignment.Center
+    props.BorderSizePixel = 0
+    return make("TextLabel", props, parent)
+end
+local function button(parent, text, size, color, callback)
+    local b = make("TextButton", {
+        Size=size, BackgroundColor3=color or C.card, BorderSizePixel=0,
+        Text=text, TextColor3=C.text, TextSize=17, Font=Enum.Font.GothamMedium,
+        AutoButtonColor=false, Active=true,
+    }, parent)
+    corner(b, 12)
+    b.MouseEnter:Connect(function()
+        if b.Parent then TweenService:Create(b,TweenInfo.new(.12),{BackgroundColor3=C.raised}):Play() end
+    end)
+    b.MouseLeave:Connect(function()
+        if b.Parent then TweenService:Create(b,TweenInfo.new(.12),{BackgroundColor3=color or C.card}):Play() end
+    end)
+    b.Activated:Connect(function()
+        if callback then callback() end
+    end)
+    return b
+end
+local function toast(message, isError)
+    if not gui or not gui.Parent then return end
+    local t = make("TextLabel", {
+        AnchorPoint=Vector2.new(0.5,1), Position=UDim2.new(0.5,0,1,-16),
+        Size=UDim2.fromOffset(330,34), BackgroundColor3=isError and Color3.fromRGB(65,30,38) or C.raised,
+        Text=message, TextColor3=C.text, TextSize=14, Font=Enum.Font.GothamMedium,
+        BorderSizePixel=0, ZIndex=100, TextWrapped=true,
+    }, main)
+    corner(t, 12); stroke(t, isError and C.red or C.border, .25, 1)
+    t.BackgroundTransparency=1; t.TextTransparency=1
+    TweenService:Create(t,TweenInfo.new(.18,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{
+        BackgroundTransparency=0,TextTransparency=0,Position=UDim2.new(.5,0,1,-22)
+    }):Play()
+    task.delay(2.4,function()
+        if t and t.Parent then
+            TweenService:Create(t,TweenInfo.new(.16),{TextTransparency=1,BackgroundTransparency=1}):Play()
+            task.delay(.2,function() if t then t:Destroy() end end)
+        end
+    end)
+end
+
+-- ===== GUI shell =====
+local existing = (gethui and gethui()) or CoreGui
+pcall(function()
+    local old = existing:FindFirstChild("SaikiChatHub")
+    if old then old:Destroy() end
+end)
+gui = make("ScreenGui", {
+    Name="SaikiChatHub", ResetOnSpawn=false, IgnoreGuiInset=true,
+    ZIndexBehavior=Enum.ZIndexBehavior.Sibling, DisplayOrder=70,
+}, existing)
+
+combined = make("Frame", {
+    Name="CombinedInterface", AnchorPoint=Vector2.new(.5,.5),
+    Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(MAIN_W+DOCK_W+GAP,MAIN_H),
+    BackgroundTransparency=1, Active=true,
+}, gui)
+-- Compact horizontal footprint; narrow icon selector and widened main window.
+local interfaceScale = make("UIScale", {Scale=1}, combined)
+
+dock = make("Frame", {
+    Name="NavigationDock", Position=UDim2.fromOffset(0,0), Size=UDim2.fromOffset(DOCK_W,MAIN_H),
+    BackgroundColor3=C.dock, BorderSizePixel=0, Active=true,
+}, combined)
+corner(dock, 20); stroke(dock,C.border,.25,1)
+
+main = make("CanvasGroup", {
+    Name="MainWindow", Position=UDim2.fromOffset(DOCK_W+GAP,0),
+    Size=UDim2.fromOffset(MAIN_W,MAIN_H), BackgroundColor3=C.bg,
+    BorderSizePixel=0, GroupTransparency=0, Active=true,
+}, combined)
+corner(main, 22); stroke(main,C.border,.2,1)
+pad(main,18,18,16,16)
+
+-- Window header
+local header = make("Frame", {Name="Header",Size=UDim2.new(1,0,0,42),BackgroundTransparency=1}, main)
+local brandIcon = make("ImageLabel", {
+    Size=UDim2.fromOffset(30,30), Position=UDim2.fromOffset(0,5),
+    BackgroundColor3=C.card, BorderSizePixel=0, Image=LOGO_URL, ScaleType=Enum.ScaleType.Crop,
+}, header)
+corner(brandIcon, 10)
+label(header,"SAIKI CHAT",14,C.text,Enum.Font.GothamBold,{
+    Position=UDim2.fromOffset(40,1),Size=UDim2.fromOffset(180,19),
+})
+label(header,"SOCIAL HUB",9,C.sub,Enum.Font.GothamMedium,{
+    Position=UDim2.fromOffset(40,19),Size=UDim2.fromOffset(150,14),
+})
+statusLabel = label(header,"CONNECTING",10,C.sub,Enum.Font.GothamMedium,{
+    AnchorPoint=Vector2.new(1,.5),Position=UDim2.new(1,-84,.5,0),Size=UDim2.fromOffset(130,24),
+    TextXAlignment=Enum.TextXAlignment.Right,
+})
+local anchorButton
+anchorButton = button(header,"UNPIN",UDim2.fromOffset(54,28),C.card,function()
+    anchored = not anchored
+    anchorButton.Text = anchored and "PINNED" or "UNPIN"
+    anchorButton.TextColor3 = anchored and C.blue or C.text
+end)
+anchorButton.Position=UDim2.new(1,-58,.5,-14)
+local hideButton
+hideButton = button(header,"—",UDim2.fromOffset(28,28),C.card,function()
+    minimized = not minimized
+    local target = minimized and UDim2.fromOffset(MAIN_W+DOCK_W+GAP,66) or UDim2.fromOffset(MAIN_W+DOCK_W+GAP,MAIN_H)
+    TweenService:Create(combined,TweenInfo.new(.25,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{Size=target}):Play()
+    main.Visible = not minimized
+    dock.Visible = not minimized
+    hideButton.Text = minimized and "+" or "—"
+end)
+hideButton.Position=UDim2.new(1,-28,.5,-14)
+
+-- Dock nav
+local dockList = make("Frame", {
+    Position=UDim2.fromOffset(6,52), Size=UDim2.new(1,-12,1,-105),
+    BackgroundTransparency=1,
+}, dock)
+make("UIListLayout",{Padding=UDim.new(0,8),HorizontalAlignment=Enum.HorizontalAlignment.Center,
+    SortOrder=Enum.SortOrder.LayoutOrder},dockList)
+
+local navDefs = {
+    {name="Messages", short="MSG"},
+    {name="People", short="PPL"},
+    {name="Profiles", short="ME"},
+    {name="Notifications", short="NTF"},
+    {name="Settings", short="SET"},
+}
+local function selectPage(name)
+    activePage=name
+    for page,b in pairs(pageButtons) do
+        b.BackgroundColor3 = page==name and C.blueTint or C.dock
+        b.TextColor3 = page==name and C.blue or C.sub
+        local st=b:FindFirstChildOfClass("UIStroke")
+        if st then st.Transparency=page==name and .05 or 1 end
+    end
+    -- Page body is swapped below after it is created.
+    if _G.SaikiHubShowPage then _G.SaikiHubShowPage(name) end
+end
+for i,def in ipairs(navDefs) do
+    local b = make("TextButton",{
+        Name=def.name,Size=UDim2.fromOffset(78,44),BackgroundColor3=C.dock,
+        BorderSizePixel=0,Text=def.name:upper(),TextColor3=C.sub,TextSize=14,
+        Font=Enum.Font.GothamBold,AutoButtonColor=false,LayoutOrder=i,
+    },dockList)
+    corner(b,14); stroke(b,C.border,1,1)
+    pageButtons[def.name]=b
+    b.Activated:Connect(function() selectPage(def.name) end)
+end
+local avatarButton = make("ImageButton",{
+    Name="LocalAvatar",AnchorPoint=Vector2.new(.5,1),Position=UDim2.new(.5,0,1,-9),
+    Size=UDim2.fromOffset(42,42),BackgroundColor3=C.card,BorderSizePixel=0,
+    Image="",AutoButtonColor=false,
+},dock)
+corner(avatarButton,18); stroke(avatarButton,C.blue,.35,1)
+task.spawn(function()
+    local image = getRobloxAvatar(LocalPlayer.UserId,"150x150")
+    if image and avatarButton.Parent then avatarButton.Image=image end
+end)
+avatarButton.Activated:Connect(function() selectPage("Profiles") end)
+
+-- Main content host
+content = make("Frame",{
+    Name="PageContent",Position=UDim2.fromOffset(0,48),Size=UDim2.new(1,0,1,-48),
+    BackgroundTransparency=1,ClipsDescendants=true,
+},main)
+
+-- Messages page layout: compact icon rail that smoothly widens to the original label-friendly selector width.
+local messagesPage = make("Frame",{Name="MessagesPage",Size=UDim2.fromScale(1,1),BackgroundTransparency=1},content)
+local SELECTOR_W = 41 -- collapsed icon rail
+local SELECTOR_EXPANDED_W = 164 -- original width, enough for labels and display names
+local selectorIsWide = false
+local layoutTween
+local side = make("Frame",{
+    Name="ChatSelector",Size=UDim2.new(0,SELECTOR_W,1,0),BackgroundColor3=C.panel,
+    BorderSizePixel=0,ClipsDescendants=true,
+},messagesPage)
+corner(side,17); stroke(side,C.border,.45,1)
+pad(side,2,2,6,6)
+label(side,"",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,24),TextXAlignment=Enum.TextXAlignment.Center})
+
+local renderDMContacts, updateSelectorPanels
+local conversation -- forward-declared so the selector animation can resize it
+local serverExpanded, dmExpanded = false, false
+local selectorTweens = {}
+local FLYOUT_W = 152
+local function tweenFlyout(panel, open, targetWidth)
+    if selectorTweens[panel] then selectorTweens[panel]:Cancel(); selectorTweens[panel]=nil end
+    if open then
+        local wasVisible=panel.Visible
+        panel.Visible=true
+        panel.ClipsDescendants=true
+        if not wasVisible then panel.Size=UDim2.new(0,0,1,0) end
+        local tween=TweenService:Create(panel,TweenInfo.new(.24,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{Size=UDim2.new(0,targetWidth,1,0)})
+        selectorTweens[panel]=tween
+        tween.Completed:Connect(function() if selectorTweens[panel]==tween then selectorTweens[panel]=nil end end)
+        tween:Play()
+    elseif panel.Visible then
+        local tween=TweenService:Create(panel,TweenInfo.new(.18,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{Size=UDim2.new(0,0,1,0)})
+        selectorTweens[panel]=tween
+        tween.Completed:Connect(function()
+            if selectorTweens[panel]==tween then panel.Visible=false; selectorTweens[panel]=nil end
+        end)
+        tween:Play()
+    else
+        panel.Size=UDim2.new(0,0,1,0)
+    end
+end
+local chatTypes = make("Frame",{Position=UDim2.fromOffset(0,26),Size=UDim2.new(1,0,0,116),BackgroundTransparency=1},side)
+make("UIListLayout",{FillDirection=Enum.FillDirection.Vertical,Padding=UDim.new(0,7),SortOrder=Enum.SortOrder.LayoutOrder,HorizontalAlignment=Enum.HorizontalAlignment.Center},chatTypes)
+local function chatTypeButton(name, text, order)
+    local b=make("TextButton",{
+        Name=name.."Selector",LayoutOrder=order,Size=UDim2.new(1,0,0,38),
+        BackgroundColor3=name==activeChat and C.blueTint or C.card,
+        BorderSizePixel=0,Text=text,TextColor3=name==activeChat and C.blue or C.sub,
+        TextSize=18,TextScaled=false,Font=Enum.Font.GothamSemibold,TextXAlignment=Enum.TextXAlignment.Center,
+        AutoButtonColor=false,
+    },chatTypes)
+    corner(b,10)
+    b.Activated:Connect(function()
+        if name=="Server" then
+            if activeChat=="Server" and serverExpanded then serverExpanded=false else serverExpanded=true end
+            activeChat="Server"; activeChannel="public"; dmExpanded=false
+        elseif name=="DMs" then
+            if activeChat=="DMs" and dmExpanded then dmExpanded=false else dmExpanded=true end
+            activeChat="DMs"; serverExpanded=false
+            if dmExpanded then renderDMContacts() end
+        else
+            activeChat="Global"; serverExpanded=false; dmExpanded=false
+        end
+        activeDMUser=nil; activeDMName=nil
+        for n,btn in pairs(activeTabButtons) do
+            btn.BackgroundColor3=n==activeChat and C.blueTint or C.card
+            btn.TextColor3=n==activeChat and C.blue or C.sub
+        end
+        if _G.SaikiHubRenderChat then _G.SaikiHubRenderChat() end
+        updateSelectorPanels()
+    end)
+    activeTabButtons[name]=b
+    return b
+end
+chatTypeButton("Global","🌐",1)
+chatTypeButton("Server","📍",2)
+chatTypeButton("DMs","✉️",3)
+
+-- Subtype lists live inside the selector. Opening a type widens the selector and
+-- gives the list enough room for full labels without covering the conversation.
+channelExpand=make("TextButton",{Name="UnusedChannelExpand",Visible=false,Size=UDim2.fromOffset(0,0),Text="",BackgroundTransparency=1},side)
+channelGroup=make("Frame",{Name="ServerTypeFlyout",Position=UDim2.fromOffset(6,146),Size=UDim2.new(0,0,1,-154),BackgroundColor3=C.panel,BorderSizePixel=0,Visible=false,ClipsDescendants=true,ZIndex=20},side)
+corner(channelGroup,14); stroke(channelGroup,C.border,.2,1); pad(channelGroup,8,8,8,8)
+label(channelGroup,"CHANNELS",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,-16,0,22),Position=UDim2.fromOffset(8,7),ZIndex=21})
+local channelButtons=make("Frame",{Position=UDim2.fromOffset(8,36),Size=UDim2.new(1,-16,0,80),BackgroundTransparency=1,ZIndex=21},channelGroup)
+make("UIListLayout",{Padding=UDim.new(0,7),SortOrder=Enum.SortOrder.LayoutOrder},channelButtons)
+local function channelButton(text,key,desc)
+    local b=make("TextButton",{
+        Size=UDim2.new(1,0,0,34),BackgroundColor3=key==activeChannel and C.blueTint or C.card,
+        BorderSizePixel=0,Text=text,TextColor3=key==activeChannel and C.blue or C.text,
+        TextSize=12,Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,
+        AutoButtonColor=false,ZIndex=22,
+    },channelButtons)
+    pad(b,9,6,0,0); corner(b,8)
+    b.Activated:Connect(function()
+        activeChat="Server"; activeChannel=key; serverExpanded=true; dmExpanded=false
+        for n,btn in pairs(activeTabButtons) do btn.BackgroundColor3=n=="Server" and C.blueTint or C.card; btn.TextColor3=n=="Server" and C.blue or C.sub end
+        for _,child in ipairs(channelButtons:GetChildren()) do
+            if child:IsA("TextButton") then child.BackgroundColor3=child==b and C.blueTint or C.card; child.TextColor3=child==b and C.blue or C.text end
+        end
+        updateSelectorPanels()
+        if _G.SaikiHubRenderChat then _G.SaikiHubRenderChat() end
+    end)
+    return b
+end
+channelButton("#  Open Lounge","public","Everyone")
+channelButton("◇  Access Lounge","access","Tier IV+")
+
+-- DM flyout opens only when the DM icon is tapped.
+local dmPanel=make("Frame",{Name="DMTypeFlyout",Position=UDim2.fromOffset(6,146),Size=UDim2.new(0,0,1,-154),BackgroundColor3=C.panel,BorderSizePixel=0,Visible=false,ClipsDescendants=true,ZIndex=20},side)
+corner(dmPanel,14); stroke(dmPanel,C.border,.2,1); pad(dmPanel,8,8,8,8)
+label(dmPanel,"DIRECT MESSAGES",10,C.sub,Enum.Font.GothamBold,{Size=UDim2.new(1,-16,0,22),Position=UDim2.fromOffset(8,7),ZIndex=21})
+local dmSearch=make("TextBox",{Name="DMSearch",Position=UDim2.fromOffset(8,35),Size=UDim2.new(1,-16,0,30),BackgroundColor3=C.card,BorderSizePixel=0,
+    Text="",PlaceholderText="Search players…",PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=12,
+    Font=Enum.Font.Gotham,ClearTextOnFocus=false,ZIndex=21},dmPanel)
+corner(dmSearch,9); pad(dmSearch,9,7,0,0)
+local dmContacts=make("ScrollingFrame",{Name="DMContacts",Position=UDim2.fromOffset(8,73),Size=UDim2.new(1,-16,1,-81),
+    BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=C.border,CanvasSize=UDim2.new(0,0,0,0),ZIndex=21},dmPanel)
+local dmLayout=make("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},dmContacts)
+dmLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() dmContacts.CanvasSize=UDim2.fromOffset(0,dmLayout.AbsoluteContentSize.Y+5) end)
+renderDMContacts=function()
+    for _,child in ipairs(dmContacts:GetChildren()) do if child:IsA("GuiObject") then child:Destroy() end end
+    local query=string.lower(dmSearch.Text or "")
+    local list={}
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr~=LocalPlayer and (query=="" or string.find(string.lower(plr.DisplayName.." "..plr.Name),query,1,true)) then table.insert(list,plr) end
+    end
+    table.sort(list,function(a,b) return string.lower(a.DisplayName)<string.lower(b.DisplayName) end)
+    if #list==0 then
+        label(dmContacts,query=="" and "Players in this server appear here." or "No matching players.",11,C.sub,Enum.Font.Gotham,{Size=UDim2.new(1,-4,0,44),TextWrapped=true,ZIndex=22})
+        return
+    end
+    for i,plr in ipairs(list) do
+        local b=make("TextButton",{Name="DM_"..plr.UserId,LayoutOrder=i,Size=UDim2.new(1,0,0,38),
+            BackgroundColor3=(tostring(activeDMUser)==tostring(plr.UserId)) and C.blueTint or C.card,
+            BorderSizePixel=0,Text=plr.DisplayName,TextColor3=C.text,TextSize=11,
+            Font=Enum.Font.GothamMedium,TextXAlignment=Enum.TextXAlignment.Left,AutoButtonColor=false,ZIndex=22},dmContacts)
+        corner(b,8); pad(b,8,5,0,0)
+        b.Activated:Connect(function()
+            activeChat="DMs"; activeDMUser=tostring(plr.UserId); activeDMName=plr.Name; dmExpanded=true; serverExpanded=false
+            for n,btn in pairs(activeTabButtons) do btn.BackgroundColor3=n=="DMs" and C.blueTint or C.card; btn.TextColor3=n=="DMs" and C.blue or C.sub end
+            updateSelectorPanels()
+            if _G.SaikiHubRenderChat then _G.SaikiHubRenderChat() end
+            renderDMContacts()
+        end)
+    end
+end
+updateSelectorPanels=function()
+    local isServer=activeChat=="Server" and serverExpanded
+    local isDM=activeChat=="DMs" and dmExpanded
+    local shouldExpand=isServer or isDM
+    selectorIsWide=shouldExpand
+
+    if layoutTween then layoutTween:Cancel(); layoutTween=nil end
+    local targetSelectorWidth=shouldExpand and SELECTOR_EXPANDED_W or SELECTOR_W
+    local info=TweenInfo.new(.27,Enum.EasingStyle.Quint,Enum.EasingDirection.Out)
+    local selectorTween=TweenService:Create(side,info,{Size=UDim2.new(0,targetSelectorWidth,1,0)})
+    local conversationTween=TweenService:Create(conversation,info,{
+        Position=UDim2.new(0,targetSelectorWidth+6,0,0),
+        Size=UDim2.new(1,-(targetSelectorWidth+6),1,0)
+    })
+    layoutTween={Cancel=function() selectorTween:Cancel(); conversationTween:Cancel() end}
+    selectorTween:Play(); conversationTween:Play()
+
+    for name,btn in pairs(activeTabButtons) do
+        btn.Text = shouldExpand and ({Global="🌐  Global",Server="📍  Server",DMs="✉  DMs"})[name] or ({Global="🌐",Server="📍",DMs="✉️"})[name]
+        btn.TextXAlignment = shouldExpand and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
+        btn.TextSize = shouldExpand and 13 or 18
+    end
+    tweenFlyout(channelGroup,isServer,FLYOUT_W)
+    tweenFlyout(dmPanel,isDM,FLYOUT_W)
+    if isDM then renderDMContacts() end
+end
+dmSearch:GetPropertyChangedSignal("Text"):Connect(renderDMContacts)
+table.insert(connections,Players.PlayerAdded:Connect(function() if dmPanel.Visible then renderDMContacts() end end))
+table.insert(connections,Players.PlayerRemoving:Connect(function(plr)
+    if tostring(activeDMUser)==tostring(plr.UserId) then activeDMUser=nil; activeDMName=nil end
+    if dmPanel.Visible then renderDMContacts() end
+end))
+
+conversation=make("Frame",{
+    Name="Conversation",Position=UDim2.new(0,SELECTOR_W+6,0,0),Size=UDim2.new(1,-(SELECTOR_W+6),1,0),BackgroundColor3=C.panel,BorderSizePixel=0,
+},messagesPage)
+corner(conversation,17); stroke(conversation,C.border,.45,1)
+pad(conversation,9,9,8,8)
+local convHeader=make("Frame",{Size=UDim2.new(1,0,0,42),BackgroundTransparency=1},conversation)
+chatTitle=label(convHeader,"Open Lounge",14,C.text,Enum.Font.GothamBold,{Size=UDim2.new(1,-8,0,22),Position=UDim2.fromOffset(0,0)})
+chatSubtitle=label(convHeader,"Server-only • same Roblox server",11,C.sub,Enum.Font.Gotham,{Size=UDim2.new(1,-8,0,17),Position=UDim2.fromOffset(0,22)})
+local divider=make("Frame",{Position=UDim2.fromOffset(0,43),Size=UDim2.new(1,0,0,1),BackgroundColor3=C.border,BorderSizePixel=0},conversation)
+messageList=make("ScrollingFrame",{
+    Name="Messages",Position=UDim2.fromOffset(0,51),Size=UDim2.new(1,0,1,-115),
+    BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,
+    ScrollBarImageColor3=C.border,CanvasSize=UDim2.new(0,0,0,0),
+},conversation)
+local listLayout=make("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},messageList)
+listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    messageList.CanvasSize=UDim2.fromOffset(0,listLayout.AbsoluteContentSize.Y+8)
+end)
+
+local composerFrame=make("Frame",{
+    Name="Composer",AnchorPoint=Vector2.new(0,1),Position=UDim2.new(0,0,1,0),
+    Size=UDim2.new(1,0,0,54),BackgroundColor3=C.card,BorderSizePixel=0,
+},conversation)
+corner(composerFrame,15); stroke(composerFrame,C.border,.25,1)
+inputBox=make("TextBox",{
+    Name="MessageInput",Position=UDim2.fromOffset(12,7),Size=UDim2.new(1,-104,1,-14),
+    BackgroundTransparency=1,BorderSizePixel=0,Text="",PlaceholderText="Message Open Lounge…",
+    PlaceholderColor3=C.sub,TextColor3=C.text,TextSize=17,Font=Enum.Font.Gotham,
+    TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,
+    TextWrapped=true,MultiLine=true,
+},composerFrame)
+
+-- Clicking/tapping anywhere in the conversation smoothly collapses the expanded
+-- selector. This is added to the original v2.0 layout without changing its
+-- selector sizing, labels, flyouts, or expand/shrink animation.
+local function collapseSelectorFromConversation()
+    if not selectorIsWide then return end
+    serverExpanded=false
+    dmExpanded=false
+    updateSelectorPanels()
+end
+
+local function watchConversationInteraction(obj)
+    if not obj:IsA("GuiObject") then return end
+    obj.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1
+            or input.UserInputType==Enum.UserInputType.Touch then
+            collapseSelectorFromConversation()
+        end
+    end)
+end
+
+-- Watch the conversation frame itself too, so taps on blank/background space
+-- collapse the selector, not only taps on child controls or message cards.
+watchConversationInteraction(conversation)
+for _,obj in ipairs(conversation:GetDescendants()) do
+    watchConversationInteraction(obj)
+end
+conversation.DescendantAdded:Connect(watchConversationInteraction)
+inputBox.Focused:Connect(collapseSelectorFromConversation)
+local stickerButton=button(composerFrame,"STK",UDim2.fromOffset(36,36),C.raised,function()
+    if _G.SaikiHubOpenStickers then _G.SaikiHubOpenStickers() end
+end)
+stickerButton.Position=UDim2.new(1,-84,0,9)
+local sendButton=button(composerFrame,"SEND",UDim2.fromOffset(44,36),C.blue,function()
+    if _G.SaikiHubSend then _G.SaikiHubSend() end
+end)
+sendButton.TextColor3=Color3.fromRGB(10,15,25)
+sendButton.Position=UDim2.new(1,-45,0,9)
+
+-- Other pages
+local otherPages={}
+local function makeInfoPage(name,titleText,subText)
+    local page=make("Frame",{Name=name.."Page",Size=UDim2.fromScale(1,1),BackgroundTransparency=1,Visible=false},content)
+    otherPages[name]=page
+    local card=make("Frame",{Position=UDim2.fromOffset(18,16),Size=UDim2.new(1,-36,0,150),BackgroundColor3=C.panel,BorderSizePixel=0},page)
+    corner(card,18); stroke(card,C.border,.35,1); pad(card,18,18,14,14)
+    label(card,titleText,18,C.text,Enum.Font.GothamBold,{Size=UDim2.new(1,0,0,30)})
+    label(card,subText,12,C.sub,Enum.Font.Gotham,{
+        Position=UDim2.fromOffset(0,37),Size=UDim2.new(1,0,0,65),TextWrapped=true,
+        TextYAlignment=Enum.TextYAlignment.Top,
+    })
+    return page,card
+end
+local _,peopleCard=makeInfoPage("People","People","Player discovery and follow actions are the next integration step. This page will show available players from the current server.")
+local _,profileCard=makeInfoPage("Profiles","Your profile","Your Roblox identity is linked to your UserID. Profile picture selection (1–100), bio, follower lists and tier calculation will be connected in the social-system pass.")
+local _,notifCard=makeInfoPage("Notifications","Notifications","Unread DM summaries and in-session server notifications will appear here once the notification module is enabled.")
+local settingsPage,settingsCard=makeInfoPage("Settings","Performance & modules","Each switch includes a plain-English explanation of its effect. Heavy modules will be unloaded when switched off.")
+local settingsY=178
+local function addSetting(name,description,defaultValue)
+    settingsState[name]=defaultValue
+    local row=make("Frame",{Position=UDim2.fromOffset(18,settingsY),Size=UDim2.new(1,-36,0,64),BackgroundColor3=C.panel,BorderSizePixel=0,Visible=false},settingsPage)
+    corner(row,14); stroke(row,C.border,.5,1)
+    label(row,name,12,C.text,Enum.Font.GothamBold,{Position=UDim2.fromOffset(12,7),Size=UDim2.new(1,-80,0,19)})
+    label(row,description,10,C.sub,Enum.Font.Gotham,{
+        Position=UDim2.fromOffset(12,27),Size=UDim2.new(1,-80,0,29),TextWrapped=true,
+        TextYAlignment=Enum.TextYAlignment.Top,
+    })
+    local toggle=make("TextButton",{AnchorPoint=Vector2.new(1,.5),Position=UDim2.new(1,-12,.5,0),Size=UDim2.fromOffset(42,24),
+        BackgroundColor3=defaultValue and C.blue or C.raised,BorderSizePixel=0,Text="",AutoButtonColor=false},row)
+    corner(toggle,12)
+    local knob=make("Frame",{Position=defaultValue and UDim2.fromOffset(21,3) or UDim2.fromOffset(3,3),
+        Size=UDim2.fromOffset(18,18),BackgroundColor3=C.text,BorderSizePixel=0},toggle)
+    corner(knob,9)
+    toggle.Activated:Connect(function()
+        settingsState[name]=not settingsState[name]
+        local on=settingsState[name]
+        TweenService:Create(toggle,TweenInfo.new(.16),{BackgroundColor3=on and C.blue or C.raised}):Play()
+        TweenService:Create(knob,TweenInfo.new(.16,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),
+            {Position=on and UDim2.fromOffset(21,3) or UDim2.fromOffset(3,3)}):Play()
+        if name=="Low-Power Mode" then
+            POLL_RATE=on and 4 or 2
+            toast(on and "Low-Power Mode enabled" or "Low-Power Mode disabled")
+        elseif name=="Sticker Preloading" then
+            toast(on and "Stickers will preload when opened" or "Sticker preloading disabled")
+        elseif name=="Aura Visibility" then
+            toast(on and "Aura visibility enabled (aura module not mounted yet)" or "Aura visibility off")
+        elseif name=="Global Chat Updates" then
+            toast(on and "Global chat polling enabled when selected" or "Global chat polling disabled")
+        else
+            toast(name .. (on and " enabled" or " disabled"))
+        end
+    end)
+    settingsY=settingsY+72
+    return row
+end
+local settingsRows={}
+table.insert(settingsRows,addSetting("Low-Power Mode","Slows polling and reduces animation work. This can reduce background activity; new messages may appear later.",false))
+table.insert(settingsRows,addSetting("Global Chat Updates","Checks Global Chat only while the Global view is open. Turning this off prevents its polling.",true))
+table.insert(settingsRows,addSetting("Sticker Preloading","Downloads sticker thumbnails when the picker opens. Turning this off reduces background downloads; first use may be slower.",false))
+table.insert(settingsRows,addSetting("Aura Visibility","Controls whether nearby tier auras are rendered. Turning this off will reduce 3D rendering once the aura module is connected.",true))
+table.insert(settingsRows,addSetting("Notifications","Allows in-session chat notification badges and summaries once the notification module is connected.",true))
+local settingsScroll=make("ScrollingFrame",{Position=UDim2.fromOffset(0,0),Size=UDim2.fromScale(1,1),BackgroundTransparency=1,
+    BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=C.border,CanvasSize=UDim2.new(0,0,0,settingsY)},settingsPage)
+-- Move settings card/rows into scroll container.
+settingsCard.Parent=settingsScroll
+for _,row in ipairs(settingsRows) do row.Parent=settingsScroll; row.Visible=true end
+settingsScroll.CanvasSize=UDim2.fromOffset(0,settingsY+10)
+
+_G.SaikiHubShowPage=function(name)
+    messagesPage.Visible=name=="Messages"
+    for pageName,page in pairs(otherPages) do page.Visible=pageName==name end
+    if name=="Settings" then
+        settingsScroll.Visible=true
+    end
+end
+
+-- ===== Message rendering and Firebase paths =====
+local function clearMessages()
+    for _,child in ipairs(messageList:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    cards={}
+    seen={}
+end
+
+local function tierStyle(uid)
+    -- Tier is intentionally not trusted from message payloads. Until the
+    -- follow graph is connected, use the neutral base bubble.
+    return C.raised, C.text
+end
+
+local function addMessage(key,msg)
+    if seen[key] then return end
+    if type(msg)~="table" or not msg.txt or not msg.uid then return end
+    seen[key]=true
+    local own=tostring(msg.uid)==tostring(auth.uid)
+    local bubbleColor,textColor=tierStyle(msg.uid)
+    local row=make("Frame",{Name="Message_"..safeName(key),Size=UDim2.new(1,0,0,48),
+        BackgroundTransparency=1,BorderSizePixel=0,LayoutOrder=#cards+1},messageList)
+    local avatar=make("ImageLabel",{Position=UDim2.fromOffset(0,3),Size=UDim2.fromOffset(28,28),
+        BackgroundColor3=C.raised,BorderSizePixel=0,Image="",ScaleType=Enum.ScaleType.Crop},row)
+    corner(avatar,14)
+    local uid=tonumber(msg.uid)
+    if uid then
+        task.spawn(function()
+            local img=getRobloxAvatar(uid,"150x150")
+            if img and avatar.Parent then avatar.Image=img end
+        end)
+    end
+    local maxW=math.max(120,messageList.AbsoluteSize.X-72)
+    local contentText=tostring(msg.txt)
+    local textSize=TextService:GetTextSize(contentText,13,Enum.Font.Gotham,Vector2.new(maxW-24,1000))
+    local bubbleW=math.clamp(textSize.X+24,76,maxW)
+    local bubbleH=math.max(34,textSize.Y+16)
+    row.Size=UDim2.new(1,0,0,bubbleH+23)
+    local bubble=make("Frame",{
+        Position=own and UDim2.new(1,-bubbleW,0,0) or UDim2.fromOffset(36,0),
+        Size=UDim2.fromOffset(bubbleW,bubbleH),BackgroundColor3=own and C.blueTint or bubbleColor,
+        BorderSizePixel=0,
+    },row)
+    corner(bubble,15)
+    if own then stroke(bubble,C.blue,.7,1) end
+    if not own then
+        label(row,tostring(msg.dn or msg.un or "Player"),10,C.blue,Enum.Font.GothamBold,{
+            Position=UDim2.fromOffset(37,0),Size=UDim2.new(1,-44,0,13),
+        })
+        bubble.Position=UDim2.fromOffset(36,15)
+        row.Size=UDim2.new(1,0,0,bubbleH+39)
+    end
+    local body=label(bubble,contentText,13,own and C.text or textColor,Enum.Font.Gotham,{
+        Position=UDim2.fromOffset(12,5),Size=UDim2.new(1,-24,1,-10),
+        TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Center,
+    })
+    local time=label(row,os.date("%H:%M",math.floor((tonumber(msg.ts) or os.time()*1000)/1000)),9,C.sub,Enum.Font.Gotham,{
+        Position=own and UDim2.new(1,-bubbleW,0,bubbleH+2) or UDim2.fromOffset(38,bubbleH+17),
+        Size=UDim2.fromOffset(bubbleW,14),TextXAlignment=own and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left,
+    })
+    table.insert(cards,row)
+    if #cards>MAX_CARDS then
+        local old=table.remove(cards,1)
+        if old and old.Parent then old:Destroy() end
+    end
+    task.defer(function()
+        if messageList and messageList.Parent then
+            messageList.CanvasPosition=Vector2.new(0,math.max(0,messageList.CanvasSize.Y.Offset-messageList.AbsoluteSize.Y))
+        end
+    end)
+end
+
+local function currentPath()
+    if activeChat=="Global" then return "/chat/global" end
+    if activeChat=="DMs" then
+        if not activeDMUser then return nil end
+        local a,b=tonumber(auth.uid) or tonumber(LocalPlayer.UserId),tonumber(activeDMUser)
+        if not a or not b then return nil end
+        local low,high=math.min(a,b),math.max(a,b)
+        return "/dm/"..tostring(low).."_"..tostring(high)
+    end
+    if activeChannel=="access" then return "/chat/server/"..enc(game.JobId).."/ch/access" end
+    -- Keep the original Saiki Rechat server-message path for compatibility.
+    return "/servers/"..enc(game.JobId).."/messages"
+end
+
+local function renderHeader()
+    if activeChat=="Server" then
+        chatTitle.Text=activeChannel=="access" and "Access Lounge" or "Open Lounge"
+        chatSubtitle.Text=activeChannel=="access" and "Permission channel • access rules depend on Firebase" or "Server-only • players in this server"
+        inputBox.PlaceholderText="Message "..chatTitle.Text.."…"
+        updateSelectorPanels()
+        stickerButton.Visible=true; sendButton.Visible=true; inputBox.Visible=true
+    elseif activeChat=="Global" then
+        chatTitle.Text="Global Chat"; chatSubtitle.Text="Across servers • last 50 messages"
+        inputBox.PlaceholderText="Message Global Chat…"; updateSelectorPanels()
+        stickerButton.Visible=true; sendButton.Visible=true; inputBox.Visible=true
+    else
+        chatTitle.Text=activeDMName and ("@"..activeDMName) or "Direct Messages"
+        chatSubtitle.Text=activeDMUser and "Private thread" or "Choose a person from People to start a DM"
+        inputBox.PlaceholderText="Write a private message…"; updateSelectorPanels()
+        stickerButton.Visible=true; sendButton.Visible=true; inputBox.Visible=true
+    end
+end
+
+_G.SaikiHubRenderChat=function()
+    renderHeader()
+    clearMessages()
+    if activeChat=="DMs" and not activeDMUser then
+        addMessage("dm_empty",{uid=tostring(auth.uid or LocalPlayer.UserId),dn="Saiki Chat",txt="Open People to select a player and start a DM.",ts=os.time()*1000})
+        return
+    end
+    if activeChat=="Server" and activeChannel=="access" then
+        addMessage("access_info",{uid=tostring(auth.uid or LocalPlayer.UserId),dn="Saiki Chat",txt="Access Lounge is reserved for eligible tiers. Firebase rules must enforce access; client-side visibility is not security.",ts=os.time()*1000})
+    end
+    if refreshMessages then task.spawn(refreshMessages) end
+end
+
+local function sendMessage()
+    local text=inputBox.Text:gsub("^%s+",""):gsub("%s+$","")
+    if text=="" then return end
+    if #text>200 then toast("Messages are limited to 200 characters.",true); return end
+    if os.clock()-lastSend<COOLDOWN then
+        toast("Slow mode: wait "..math.ceil(COOLDOWN-(os.clock()-lastSend)).."s.",true); return
+    end
+    local path=currentPath()
+    if not path then toast("Choose a DM contact first.",true); return end
+    if activeChat=="DMs" then
+        toast("DM sending will be enabled after the DM contact/index pass.",true)
+        return
+    end
+    if activeChat=="Global" and not settingsState["Global Chat Updates"] then
+        toast("Global Chat Updates is disabled in Settings.",true); return
+    end
+    if activeChannel=="access" then
+        toast("Access Lounge sending is disabled until tier rules are connected.",true); return
+    end
+    lastSend=os.clock()
+    local payload={
+        uid=tostring(LocalPlayer.UserId), dn=LocalPlayer.DisplayName, un=LocalPlayer.Name,
+        pfp=1, txt=text, ts={[".sv"]="timestamp"},
+    }
+    inputBox.Text=""
+    -- Optimistic local render so the UI responds immediately.
+    addMessage("local_"..tostring(os.clock()),{
+        uid=tostring(LocalPlayer.UserId),dn=LocalPlayer.DisplayName,un=LocalPlayer.Name,
+        txt=text,ts=os.time()*1000,
+    })
+    task.spawn(function()
+        local ok,data,raw=dbRequest("POST",path,payload,auth,FIREBASE_DB)
+        if ok then
+            toast("Message sent")
+        else
+            toast("Firebase write failed: "..tostring(raw),true)
+            warn("[SAIKI CHAT] Send failed: "..tostring(raw))
+        end
+    end)
+end
+_G.SaikiHubSend=sendMessage
+sendButton.Activated:Connect(sendMessage)
+inputBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed and UserInputService:GetFocusedTextBox()==nil then sendMessage() end
+end)
+
+refreshMessages=function()
+    local path=currentPath()
+    if not path or not alive then return end
+    local extra='orderBy="$key"&limitToLast='..MAX_CARDS
+    local ok,data,raw=dbRequest("GET",path,nil,auth,FIREBASE_DB,extra)
+    if not ok then
+        if activePage=="Messages" then statusLabel.Text="OFFLINE"; statusLabel.TextColor3=C.red end
+        warn("[SAIKI CHAT] Read failed: "..tostring(raw))
+        return
+    end
+    if type(data)~="table" then return end
+    local rows={}
+    for key,msg in pairs(data) do
+        if type(msg)=="table" then table.insert(rows,{key=key,msg=msg}) end
+    end
+    table.sort(rows,function(a,b) return tostring(a.key)<tostring(b.key) end)
+    for _,item in ipairs(rows) do addMessage(item.key,item.msg) end
+end
+
+-- ===== Sticker picker (GitHub folders are discovered dynamically) =====
+local stickerOverlay
+local function closeStickerPicker()
+    if stickerOverlay then stickerOverlay:Destroy(); stickerOverlay=nil end
+end
+_G.SaikiHubOpenStickers=function()
+    if stickerOverlay then closeStickerPicker(); return end
+    stickerOverlay=make("Frame",{
+        Name="StickerPicker",AnchorPoint=Vector2.new(1,1),Position=UDim2.new(1,-12,1,-70),
+        Size=UDim2.fromOffset(390,300),BackgroundColor3=C.bg,BorderSizePixel=0,ZIndex=30,
+    },conversation)
+    corner(stickerOverlay,18); stroke(stickerOverlay,C.border,.1,1); pad(stickerOverlay,10,10,10,10)
+    label(stickerOverlay,"STICKERS",11,C.text,Enum.Font.GothamBold,{Size=UDim2.new(1,-40,0,24),ZIndex=31})
+    local close=button(stickerOverlay,"×",UDim2.fromOffset(28,26),C.card,closeStickerPicker)
+    close.Position=UDim2.new(1,-28,0,0); close.ZIndex=32
+    local cats=make("ScrollingFrame",{Position=UDim2.fromOffset(0,30),Size=UDim2.new(1,0,0,30),
+        BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=0,CanvasSize=UDim2.fromOffset(#STICKER_REPOS*88,0)},stickerOverlay)
+    make("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,5)},cats)
+    local grid=make("ScrollingFrame",{Position=UDim2.fromOffset(0,66),Size=UDim2.new(1,0,1,-70),
+        BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.new(0,0,0,0)},stickerOverlay)
+    local gridLayout=make("UIGridLayout",{CellSize=UDim2.fromOffset(78,78),CellPadding=UDim2.fromOffset(7,7)},grid)
+    gridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() grid.CanvasSize=UDim2.fromOffset(0,gridLayout.AbsoluteContentSize.Y+8) end)
+    local function loadCategory(repo)
+        currentStickerCategory=repo
+        for _,child in ipairs(grid:GetChildren()) do if child:IsA("ImageButton") then child:Destroy() end end
+        task.spawn(function()
+            local contents=githubContents(repo,"")
+            if type(contents)~="table" then toast("Could not load sticker list.",true); return end
+            local count=0
+            for _,item in ipairs(contents) do
+                local lowerName=item.name:lower()
+                local isImage=lowerName:match("%.png$") or lowerName:match("%.jpg$") or lowerName:match("%.jpeg$") or lowerName:match("%.webp$") or lowerName:match("%.gif$")
+                if item.type=="file" and isImage then
+                    count=count+1
+                    if count>80 then break end
+                    local raw=item.download_url or ("https://raw.githubusercontent.com/"..GITHUB_OWNER.."/"..repo.."/main/"..enc(item.name))
+                    local localPath=STICKER_CACHE.."/"..safeName(repo).."_"..safeName(item.name)
+                    local asset=cachedAsset(raw,localPath)
+                    local tile=make("ImageButton",{Size=UDim2.fromOffset(78,78),BackgroundColor3=C.card,
+                        BorderSizePixel=0,Image=asset or raw,ScaleType=Enum.ScaleType.Fit,AutoButtonColor=false},grid)
+                    corner(tile,12); stroke(tile,C.border,.5,1)
+                    tile.Activated:Connect(function()
+                        toast("Sticker sending will be connected with the message payload in the next pass.")
+                    end)
+                    if count%3==0 then task.wait(.03) end
+                end
+            end
+        end)
+    end
+    for _,def in ipairs(STICKER_REPOS) do
+        local b=button(cats,def.name:gsub("%-XD",""),UDim2.fromOffset(84,27),C.card,function() loadCategory(def.repo) end)
+        b.TextSize=12; b.ZIndex=31
+    end
+    loadCategory(currentStickerCategory)
+end
+
+-- ===== Drag the dock + window as one combined interface =====
+local function beginDrag(input)
+    if anchored then return end
+    dragging=true; dragStart=input.Position; startPos=combined.Position
+end
+local function endDrag() dragging=false end
+header.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then beginDrag(input) end
+end)
+dock.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then beginDrag(input) end
+end)
+table.insert(connections,UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+        local delta=input.Position-dragStart
+        combined.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
+    end
+end))
+table.insert(connections,UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then endDrag() end
+end))
+
+-- Responsive scaling: preserve the combined shape on smaller screens.
+local function fitToViewport()
+    local camera=workspace.CurrentCamera
+    if not camera then return end
+    local viewport=camera.ViewportSize
+    local sx=(viewport.X-24)/(MAIN_W+DOCK_W+GAP)
+    local sy=(viewport.Y-24)/MAIN_H
+    local scale=math.clamp(math.min(sx,sy,1),.55,1)
+    local scaler=combined:FindFirstChildOfClass("UIScale") or make("UIScale",{Scale=scale},combined)
+    scaler.Scale=scale
+end
+if workspace.CurrentCamera then
+    table.insert(connections,workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitToViewport))
+end
+fitToViewport()
+
+-- ===== Boot =====
+selectPage("Messages")
+renderHeader()
+statusLabel.Text="AUTHENTICATING"
+task.spawn(function()
+    local ok=firebaseAuth(auth)
+    if ok then
+        -- Publish only basic self-profile fields; never trust a client-supplied tier.
+        local profile={
+            dn=LocalPlayer.DisplayName, un=LocalPlayer.Name, pfp=1,
+            age=LocalPlayer.AccountAge, upd={[".sv"]="timestamp"},
+        }
+        local wrote,_,raw=dbRequest("PATCH","/profiles/"..tostring(LocalPlayer.UserId),profile,auth,FIREBASE_DB)
+        statusLabel.Text="CONNECTED"
+        statusLabel.TextColor3=C.green
+        toast("Connected to Saiki Firebase")
+        if not wrote then warn("[SAIKI CHAT] Profile update denied: "..tostring(raw)) end
+        refreshMessages()
+    else
+        statusLabel.Text="AUTH FAILED"
+        statusLabel.TextColor3=C.red
+        toast("Firebase authentication failed. Check project/auth settings.",true)
+    end
+end)
+
+_G.SaikiChatHub={
+    GUI=gui,
+    Refresh=function() if refreshMessages then refreshMessages() end end,
+    Show=function() combined.Visible=true end,
+    Hide=function() combined.Visible=false end,
+    Destroy=function()
+        alive=false
+        for _,conn in ipairs(connections) do pcall(function() conn:Disconnect() end) end
+        if gui then gui:Destroy() end
+        _G.SaikiHubShowPage=nil
+        _G.SaikiHubRenderChat=nil
+        _G.SaikiHubSend=nil
+        _G.SaikiHubOpenStickers=nil
+    end,
+}
+
+task.spawn(function()
+    while alive and gui.Parent do
+        task.wait(POLL_RATE)
+        if not alive then break end
+        if activePage=="Messages" then
+            if activeChat~="Global" or settingsState["Global Chat Updates"] then
+                refreshMessages()
+            end
+        end
+    end
+end)
+
+print("[SAIKI CHAT HUB] Foundation loaded. Use _G.SaikiChatHub:Destroy() to unload.")
