@@ -1,5 +1,5 @@
 --[[
-SAIKI CHAT HUB v1.0 — FOUNDATION BUILD
+SAIKI CHAT HUB v1.3 — SMALLER GUI BUILD
 Client-side Luau / executor build.
 Design: soft dark surfaces, electric-blue accent, fully rounded controls,
 separate left navigation dock + main window, smooth lightweight transitions.
@@ -75,8 +75,8 @@ local C = {
     red = Color3.fromRGB(240,120,131),
 }
 
-local MAIN_W, MAIN_H = 760, 520
-local DOCK_W, GAP = 92, 8
+local MAIN_W, MAIN_H = 680, 460
+local DOCK_W, GAP = 78, 7
 local MAX_CARDS, POLL_RATE, COOLDOWN = 50, 2.0, 3
 local activePage, activeChat, activeChannel = "Messages", "Server", "public"
 local activeDMUser, activeDMName = nil, nil
@@ -342,8 +342,8 @@ combined = make("Frame", {
     Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(MAIN_W+DOCK_W+GAP,MAIN_H),
     BackgroundTransparency=1, Active=true,
 }, gui)
--- Compact overall footprint; fonts are enlarged below so the UI remains readable.
-local interfaceScale = make("UIScale", {Scale=0.85}, combined)
+-- Smaller overall footprint; keep the enlarged font treatment from v1.2.
+local interfaceScale = make("UIScale", {Scale=1}, combined)
 
 dock = make("Frame", {
     Name="NavigationDock", Position=UDim2.fromOffset(0,0), Size=UDim2.fromOffset(DOCK_W,MAIN_H),
